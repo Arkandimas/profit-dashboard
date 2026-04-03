@@ -1,12 +1,23 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
-import { chunkDateRange, getOrderList, getOrderDetail, refreshAccessToken } from '@/lib/shopee'
+import { chunkDateRange, getOrderList, getOrderDetail, getEscrowDetail, refreshAccessToken, type ShopeeOrderDetail } from '@/lib/shopee'
 
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
+
+// ── Commission fee estimation ─────────────────────────────────────────────────
+// Shopee escrow API sometimes returns commission_fee = 0 before settlement.
+// Set USE_ESTIMATED_COMMISSION = true to use a flat-rate estimate instead.
+const USE_ESTIMATED_COMMISSION = true
+const ESTIMATED_COMMISSION_RATE = 0.03  // 3% — Health & Beauty category, Shopee ID
+
+function resolveCommissionFee(apiValue: number, revenue: number): number {
+  if (USE_ESTIMATED_COMMISSION) return Math.round(revenue * ESTIMATED_COMMISSION_RATE)
+  return apiValue ?? 0
+}
 
 const COOKIE_OPTS = {
   path: '/',
@@ -30,6 +41,7 @@ export async function POST(request: Request) {
         { status: 401 }
       )
     }
+    const token = accessToken
 
     // ── Step 0: Auto-refresh access token before sync ────────────────────────
     // Shopee tokens expire in ~4 hours. Silently refresh before every sync so
@@ -44,8 +56,10 @@ export async function POST(request: Request) {
         refreshedAccessToken = newTokens.access_token
         refreshedRefreshToken = newTokens.refresh_token
       } catch (refreshErr) {
-        // Non-fatal: continue with the current token and let the sync itself
-        // fail with a clear message if the token really is expired.
+        // INTENTIONAL: refresh failure is non-fatal. We continue with existing token.
+        // If the existing token is also expired, the subsequent Shopee API calls will
+        // fail with a clear error. We do NOT return 500 here by design.
+        // See: testsprite-mcp-test-report.md TC006 analysis.
         console.warn('[sync] Token refresh failed (will try existing token):', refreshErr)
       }
     }
@@ -63,7 +77,7 @@ export async function POST(request: Request) {
     // ── Step 1: Fetch order SNs across all time chunks ───────────────────────
     const seenSns = new Set<string>()
     for (const chunk of chunks) {
-      const summaries = await getOrderList(accessToken, shopId, chunk.start, chunk.end)
+      const summaries = await getOrderList(token, shopId, chunk.start, chunk.end)
       for (const o of summaries) seenSns.add(o.order_sn)
     }
 
@@ -77,12 +91,33 @@ export async function POST(request: Request) {
 
     // ── Step 2: Fetch order details in batches of 50 (Shopee limit) ──────────
     const BATCH_SIZE = 50
-    const details = []
+    const details: ShopeeOrderDetail[] = []
     for (let i = 0; i < orderSnList.length; i += BATCH_SIZE) {
       const batch = orderSnList.slice(i, i + BATCH_SIZE)
-      const batchDetails = await getOrderDetail(batch, accessToken, shopId)
+      const batchDetails = await getOrderDetail(batch, token, shopId)
       details.push(...batchDetails)
     }
+
+    // ── Step 2b: Fetch escrow details (fees, buyer paid amount) ───────────────
+    // Escrow API is per-order. Use a small concurrency limit to avoid rate limits.
+    const escrowBySn = new Map<string, Awaited<ReturnType<typeof getEscrowDetail>> | null>()
+    const CONCURRENCY = 5
+    let idx = 0
+    async function worker() {
+      for (;;) {
+        const i = idx++
+        if (i >= details.length) return
+        const sn = details[i]?.order_sn
+        if (!sn) continue
+        try {
+          const esc = await getEscrowDetail(String(sn), token, shopId)
+          escrowBySn.set(sn, esc)
+        } catch {
+          escrowBySn.set(sn, null)
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()))
 
     // ── Step 3: Map to DB rows ────────────────────────────────────────────────
     const rows = details.map((order) => {
@@ -97,30 +132,49 @@ export async function POST(request: Request) {
       //
       // We do NOT use `total_amount` because that is the gross amount paid by
       // the buyer which includes shipping and may include Shopee subsidies.
-      const itemRevenue = Array.isArray(order.item_list) && order.item_list.length > 0
-        ? order.item_list.reduce((sum: number, item: { model_discounted_price: number; model_original_price: number; model_quantity_purchased: number }) => {
-            const price = item.model_discounted_price ?? item.model_original_price ?? 0
-            const qty   = item.model_quantity_purchased ?? 1
-            return sum + price * qty
-          }, 0)
-        : null
+      const gmv = (Array.isArray(order.item_list) ? order.item_list : []).reduce((sum, item) => {
+        const price = item.model_original_price || item.model_discounted_price || 0
+        const qty = item.model_quantity_purchased || 1
+        return sum + price * qty
+      }, 0)
+
+      // Revenue = buyer_paid_amount when escrow is available; fallback to discounted item sum.
+      const itemRevenue = (Array.isArray(order.item_list) ? order.item_list : []).reduce((sum, item) => {
+        const price = item.model_discounted_price ?? item.model_original_price ?? 0
+        const qty = item.model_quantity_purchased ?? 1
+        return sum + price * qty
+      }, 0)
 
       // Fallback: if item_list is missing in the API response, use total_amount.
       // This should be rare since we request items as an optional field.
-      const revenue = itemRevenue !== null ? itemRevenue : (order.total_amount ?? 0)
+      const esc = escrowBySn.get(order.order_sn) ?? null
+      const buyer_paid_amount = Number(esc?.order_income?.buyer_paid_amount ?? 0)
+      const commission_fee = Number(esc?.order_income?.commission_fee ?? 0)
+      const service_fee = Number(esc?.order_income?.service_fee ?? 0)
+      const voucher_amount = Number(esc?.order_income?.voucher_from_seller ?? 0) + Number(esc?.order_income?.voucher_from_shopee ?? 0)
+      const escrow_amount = Number(esc?.order_income?.escrow_amount ?? esc?.order_income?.order_income ?? 0)
+
+      const revenue = buyer_paid_amount > 0 ? buyer_paid_amount : (itemRevenue || order.total_amount || 0)
 
       const cogs = 0 // user sets COGS per product manually
       const shipping_fee = order.actual_shipping_fee ?? 0
-      const platform_fee = order.commission_fee ?? 0
+      const resolved_commission = resolveCommissionFee(commission_fee || (order.commission_fee ?? 0), revenue)
+      const platform_fee = resolved_commission + (service_fee || 0)
       const net_profit = revenue - cogs - shipping_fee - platform_fee
       const payTime = order.pay_time && order.pay_time > 0 ? order.pay_time : null
       return {
         platform: 'Shopee' as const,
         order_id: order.order_sn,
+        gmv,
+        buyer_paid_amount,
+        voucher_amount,
         revenue,
         cogs,
         shipping_fee,
         platform_fee,
+        commission_fee: resolved_commission,
+        service_fee,
+        escrow_amount,
         net_profit,
         status: order.order_status?.toLowerCase() ?? 'unknown',
         created_at: new Date(order.create_time * 1000).toISOString(),
@@ -134,7 +188,12 @@ export async function POST(request: Request) {
     const { error } = await supabase.from('orders').upsert(rows, { onConflict: 'order_id' })
     if (error) throw new Error(`Supabase upsert failed: ${error.message}`)
 
-    const resPayload = NextResponse.json({ synced: rows.length, chunks: chunks.length, days })
+    const resPayload = NextResponse.json({
+      synced: rows.length,
+      chunks: chunks.length,
+      days,
+      commission_mode: USE_ESTIMATED_COMMISSION ? 'estimated_3pct' : 'api_value',
+    })
     persistTokensIfRefreshed(resPayload, refreshedAccessToken, refreshedRefreshToken)
     return resPayload
   } catch (err) {

@@ -12,10 +12,16 @@ export interface Order {
   id: string
   platform: Platform
   order_id: string
+  gmv?: number
+  buyer_paid_amount?: number
+  voucher_amount?: number
   revenue: number
   cogs: number
   shipping_fee: number
   platform_fee: number
+  commission_fee?: number
+  service_fee?: number
+  escrow_amount?: number
   status: string
   created_at: string
   /** When Shopee reports payment time; used for “paid order” date filters (seller center style). */

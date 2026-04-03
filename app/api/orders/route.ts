@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
 // Shopee statuses that will never contribute to "Pesanan Dibayar" revenue.
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
 
   let query = supabase
     .from('orders')
-    .select('id, platform, order_id, revenue, cogs, shipping_fee, platform_fee, status, created_at, paid_at')
+    .select('id, platform, order_id, gmv, buyer_paid_amount, voucher_amount, revenue, cogs, shipping_fee, platform_fee, commission_fee, service_fee, escrow_amount, status, created_at, paid_at')
     // Fetch rows whose created_at OR paid_at falls within the window.
     // The precise day-level filtering (Yesterday / Last 7 Days etc.) is done
     // client-side in Asia/Jakarta timezone by filterOrdersByReportDate().

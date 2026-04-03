@@ -13,8 +13,10 @@ import {
   Pie,
   Cell,
   Legend,
+  BarChart,
+  Bar,
 } from 'recharts'
-import { DollarSign, ShoppingCart, TrendingUp, Percent, Package, Megaphone, RefreshCw } from 'lucide-react'
+import { DollarSign, ShoppingCart, TrendingUp, Percent, Package, Megaphone, RefreshCw, Tag } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -42,7 +44,7 @@ function reportTimeMs(o: Order): number {
   return new Date(o.paid_at || o.created_at).getTime()
 }
 
-const CHART_METRICS = ['Net Profit', 'Revenue', 'Orders'] as const
+const CHART_METRICS = ['GMV', 'Revenue', 'Orders'] as const
 type ChartMetric = (typeof CHART_METRICS)[number]
 
 const PIE_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6']
@@ -52,7 +54,7 @@ type SyncStatus = { state: 'idle' } | { state: 'loading' } | { state: 'success';
 export default function DashboardPage() {
   const [datePreset, setDatePreset] = useState('last30')
   const [platform, setPlatform] = useState<PlatformFilter>('Shopee')
-  const [chartMetric, setChartMetric] = useState<ChartMetric>('Net Profit')
+  const [chartMetric, setChartMetric] = useState<ChartMetric>('GMV')
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ state: 'idle' })
   const [shopeeConnected, setShopeeConnected] = useState<boolean | null>(null)
   const [liveOrders, setLiveOrders] = useState<typeof dummyOrders | null>(null)
@@ -146,24 +148,71 @@ export default function DashboardPage() {
     return ((current - previous) / previous) * 100
   }
 
-  // Chart data: daily aggregation
+  // Chart data: daily aggregation (grouped by paid_at date)
   const chartData = useMemo(() => {
     const days = eachDayOfInterval({ start: from, end: to })
     return days.map((day) => {
-      const dayStr = format(day, 'MMM d')
+      const label = format(day, 'yyyy-MM-dd')
       const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0)
       const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59, 59)
       const dayOrders = filterOrdersByReportDate(filteredOrders, dayStart, dayEnd)
       const dayAds = filterByDateRange(filteredAdSpend, dayStart, dayEnd)
       const m = calcMetrics(dayOrders, dayAds, NO_MANUAL_EXPENSES)
+      const gmv = dayOrders.reduce((s, o) => s + (Number(o.gmv) || 0), 0)
       return {
-        date: dayStr,
-        'Net Profit': Math.round(m.netProfit / 1000),
+        date: label,
+        GMV: Math.round(gmv / 1000),
         Revenue: Math.round(m.revenue / 1000),
         Orders: m.orders,
       }
     })
   }, [filteredOrders, filteredAdSpend, from, to])
+
+  const gmvTotal = useMemo(
+    () => filteredOrders.reduce((s, o) => s + (Number(o.gmv) || 0), 0),
+    [filteredOrders]
+  )
+
+  const cancelledOrders = useMemo(
+    () =>
+      filteredOrders.filter((o) => ['cancelled', 'canceled', 'in_cancel'].includes((o.status ?? '').toLowerCase().trim())).length,
+    [filteredOrders]
+  )
+
+  const paidOrders = metrics.orders
+  const conversionHint = useMemo(() => {
+    const denom = paidOrders + cancelledOrders
+    if (denom <= 0) return '—'
+    return `${((paidOrders / denom) * 100).toFixed(1)}% paid rate`
+  }, [paidOrders, cancelledOrders])
+
+  const platformFees = useMemo(
+    () => filteredOrders.reduce((s, o) => s + (Number(o.commission_fee) || 0) + (Number(o.service_fee) || 0), 0),
+    [filteredOrders]
+  )
+  const netRevenue = useMemo(() => metrics.revenue - platformFees, [metrics.revenue, platformFees])
+  const netProfit = useMemo(() => netRevenue - metrics.cogs - metrics.adSpendTotal, [netRevenue, metrics.cogs, metrics.adSpendTotal])
+
+  // Waterfall breakdown data: GMV → Diskon → Revenue → COGS → Ongkir → Komisi → Iklan → Net Profit
+  const waterfallData = useMemo(() => {
+    const rev = metrics.revenue
+    const cg = metrics.cogs
+    const ship = metrics.shippingCost
+    const komisi = platformFees
+    const iklan = metrics.adSpendTotal
+    const discount = Math.max(0, gmvTotal - rev)
+    const profit = rev - cg - ship - komisi - iklan
+    return [
+      { name: 'GMV',    base: 0,                                              value: gmvTotal,         fill: '#6366f1' },
+      { name: 'Diskon', base: rev,                                             value: discount,         fill: '#f59e0b' },
+      { name: 'Revenue',base: 0,                                               value: rev,              fill: '#3b82f6' },
+      { name: 'COGS',   base: Math.max(0, rev - cg),                           value: cg,               fill: '#ef4444' },
+      { name: 'Ongkir', base: Math.max(0, rev - cg - ship),                   value: ship,             fill: '#ef4444' },
+      { name: 'Komisi', base: Math.max(0, rev - cg - ship - komisi),          value: komisi,           fill: '#ef4444' },
+      { name: 'Iklan',  base: Math.max(0, rev - cg - ship - komisi - iklan),  value: iklan,            fill: '#ef4444' },
+      { name: 'Profit', base: 0,                                               value: Math.abs(profit), fill: profit >= 0 ? '#10b981' : '#ef4444' },
+    ]
+  }, [gmvTotal, metrics, platformFees])
 
   // Pie data — Shopee Ads shown as separate slice from general Ad Spend
   const pieData = [
@@ -244,47 +293,117 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        <KpiCard
-          title="Total Revenue"
-          value={formatCurrency(metrics.revenue)}
-          change={pctChange(metrics.revenue, prevMetrics.revenue)}
-          icon={<DollarSign className="w-4 h-4" />}
-        />
-        <KpiCard
-          title="Total Orders"
-          value={metrics.orders.toLocaleString()}
-          change={pctChange(metrics.orders, prevMetrics.orders)}
-          icon={<ShoppingCart className="w-4 h-4" />}
-        />
-        <KpiCard
-          title="Net Profit"
-          value={formatCurrency(metrics.netProfit)}
-          change={pctChange(metrics.netProfit, prevMetrics.netProfit)}
-          icon={<TrendingUp className="w-4 h-4" />}
-          highlight
-        />
-        <KpiCard
-          title="Profit Margin"
-          value={`${metrics.margin.toFixed(1)}%`}
-          change={pctChange(metrics.margin, prevMetrics.margin)}
-          icon={<Percent className="w-4 h-4" />}
-        />
-        <KpiCard
-          title="COGS"
-          value={formatCurrency(metrics.cogs)}
-          icon={<Package className="w-4 h-4" />}
-        />
-        <KpiCard
-          title="Ad Spend"
-          value={formatCurrency(metrics.adSpendTotal)}
-          icon={<Megaphone className="w-4 h-4" />}
-        />
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <KpiCard
+            title="GMV (Penjualan)"
+            value={formatCurrency(gmvTotal)}
+            icon={<Tag className="w-4 h-4" />}
+          />
+          <KpiCard
+            title="Total Orders (Paid)"
+            value={paidOrders.toLocaleString()}
+            icon={<ShoppingCart className="w-4 h-4" />}
+          />
+          <KpiCard
+            title="Cancelled Orders"
+            value={cancelledOrders.toLocaleString()}
+            icon={<Package className="w-4 h-4" />}
+          />
+          <KpiCard
+            title="Conversion"
+            value={conversionHint}
+            icon={<Percent className="w-4 h-4" />}
+          />
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <KpiCard
+            title="Revenue (buyer paid)"
+            value={formatCurrency(metrics.revenue)}
+            icon={<DollarSign className="w-4 h-4" />}
+          />
+          <KpiCard
+            title="Platform Fee"
+            value={formatCurrency(platformFees)}
+            icon={<Megaphone className="w-4 h-4" />}
+          />
+          <KpiCard
+            title="Net Revenue"
+            value={formatCurrency(netRevenue)}
+            icon={<TrendingUp className="w-4 h-4" />}
+          />
+          <KpiCard
+            title="Net Profit"
+            value={formatCurrency(netProfit)}
+            icon={<TrendingUp className="w-4 h-4" />}
+            highlight
+          />
+        </div>
+
+        <Card>
+          <CardContent className="p-4 text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">GMV</span> {formatCurrency(gmvTotal)} →
+            <span className="ml-2">-Voucher</span> {formatCurrency(filteredOrders.reduce((s, o) => s + (Number(o.voucher_amount) || 0), 0))} →
+            <span className="ml-2 font-medium text-foreground">Revenue</span> {formatCurrency(metrics.revenue)} →
+            <span className="ml-2">-Fees</span> {formatCurrency(platformFees)} →
+            <span className="ml-2">Escrow</span> {formatCurrency(filteredOrders.reduce((s, o) => s + (Number(o.escrow_amount) || 0), 0))} →
+            <span className="ml-2">-COGS</span> {formatCurrency(metrics.cogs)} →
+            <span className="ml-2 font-medium text-foreground">Net Profit</span> {formatCurrency(netProfit)}
+          </CardContent>
+        </Card>
       </div>
+
+      {/* COGS warning banner */}
+      {liveOrders !== null && metrics.cogs === 0 && metrics.orders > 0 && (
+        <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-2">
+          <span>⚠️</span>
+          <span>COGS belum diset — net profit ditampilkan tanpa biaya produksi. Set COGS di halaman <a href="/products" className="underline">Produk</a>.</span>
+        </div>
+      )}
+
+      {/* Waterfall Breakdown */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Profit Waterfall</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={waterfallData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} tickLine={false} />
+              <YAxis tick={{ fontSize: 11 }} tickLine={false} tickFormatter={(v) => `${Math.round(v / 1000)}K`} />
+              <Tooltip
+                content={({ active, payload, label }) => {
+                  if (!active || !payload) return null
+                  const item = payload.find((p) => p.dataKey === 'value')
+                  if (!item) return null
+                  const entry = waterfallData.find((d) => d.name === label)
+                  const isNegative = ['Diskon', 'COGS', 'Ongkir', 'Komisi', 'Iklan'].includes(String(label))
+                  return (
+                    <div className="bg-white dark:bg-slate-900 border rounded shadow-sm px-3 py-2 text-sm">
+                      <p className="font-medium mb-1">{label}</p>
+                      <p style={{ color: entry?.fill }}>
+                        {isNegative ? '−' : '+'}{formatCurrency(Number(item.value))}
+                      </p>
+                    </div>
+                  )
+                }}
+              />
+              <Bar dataKey="base" stackId="wf" fill="transparent" />
+              <Bar dataKey="value" stackId="wf" radius={[3, 3, 0, 0]}>
+                {waterfallData.map((entry, i) => (
+                  <Cell key={`wf-${i}`} fill={entry.fill} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
 
       {/* Charts Row */}
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Line Chart */}
+        {/* Trend Chart */}
         <Card className="lg:col-span-2">
           <CardHeader>
             <div className="flex items-center justify-between flex-wrap gap-2">
@@ -306,32 +425,24 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 11 }}
-                  tickLine={false}
-                  interval={Math.floor(chartData.length / 6)}
-                />
-                <YAxis tick={{ fontSize: 11 }} tickLine={false} tickFormatter={yAxisTickFormatter} />
-                <Tooltip
-                  formatter={(value) => {
-                    const v = Number(value)
-                    return chartMetric === 'Orders'
-                      ? [`${v}`, chartMetric]
-                      : [formatCurrency(v * 1000), chartMetric]
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey={chartMetric}
-                  stroke="#10b981"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                />
-              </LineChart>
+              {chartMetric === 'Orders' ? (
+                <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} tickLine={false} interval={Math.floor(chartData.length / 6)} />
+                  <YAxis tick={{ fontSize: 11 }} tickLine={false} />
+                  <Tooltip />
+                  <Bar dataKey="Orders" fill="#10b981" />
+                </BarChart>
+              ) : (
+                <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} tickLine={false} interval={Math.floor(chartData.length / 6)} />
+                  <YAxis tick={{ fontSize: 11 }} tickLine={false} tickFormatter={(v) => `${v}K`} />
+                  <Tooltip formatter={(value) => formatCurrency(Number(value) * 1000)} />
+                  <Line type="monotone" dataKey="GMV" stroke="#10b981" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="Revenue" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                </LineChart>
+              )}
             </ResponsiveContainer>
           </CardContent>
         </Card>

@@ -84,7 +84,9 @@ export function generateOrders(products: Product[]): Order[] {
       const qty = randomBetween(1, 3)
       const cogs = product.cogs_per_unit * qty
       const markup = 1.8 + seededRandom() * 1.2
-      const revenue = Math.round(cogs * markup)
+      const gmv = Math.round(cogs * markup)
+      const discountRate = seededRandom() * 0.15  // 0–15% seller discount
+      const revenue = Math.round(gmv * (1 - discountRate))
       const shippingFee = randomBetween(8000, 20000)
       const platformFeeRate = platform === 'Shopee' ? 0.025 : 0.03
       const platformFee = Math.round(revenue * platformFeeRate)
@@ -96,6 +98,7 @@ export function generateOrders(products: Product[]): Order[] {
         id: `ord-${orderNum}`,
         platform,
         order_id: `${platform === 'Shopee' ? 'SHP' : 'TTK'}${orderNum}`,
+        gmv: status === 'returned' ? 0 : gmv,
         revenue: status === 'returned' ? 0 : revenue,
         cogs: status === 'returned' ? 0 : cogs,
         shipping_fee: status === 'returned' ? 0 : shippingFee,
@@ -296,6 +299,14 @@ function shiftJakartaDate(dateStr: string, days: number): string {
 export function getDateRange(preset: string): { from: Date; to: Date } {
   const todayStr = jakartaTodayStr()
 
+  // Custom range format: custom:YYYY-MM-DD:YYYY-MM-DD
+  if (preset.startsWith('custom:')) {
+    const [, fromStr, toStr] = preset.split(':')
+    if (fromStr && toStr) {
+      return { from: jakartaDayStart(fromStr), to: jakartaDayEnd(toStr) }
+    }
+  }
+
   switch (preset) {
     case 'today':
       return { from: jakartaDayStart(todayStr), to: jakartaDayEnd(todayStr) }
@@ -368,7 +379,9 @@ export function orderCountsForShopeeKpi(status: string | null | undefined): bool
 
 export function calcMetrics(orders: Order[], adSpend: AdSpend[], expenses: Expense[]) {
   const completedOrders = orders.filter((o) => orderCountsForShopeeKpi(o.status))
+  const gmv = completedOrders.reduce((s, o) => s + (o.gmv ?? o.revenue), 0)
   const revenue = completedOrders.reduce((s, o) => s + o.revenue, 0)
+  const sellerDiscount = gmv - revenue
   const cogs = completedOrders.reduce((s, o) => s + o.cogs, 0)
   const shippingCost = completedOrders.reduce((s, o) => s + o.shipping_fee, 0)
   const platformFees = completedOrders.reduce((s, o) => s + o.platform_fee, 0)
@@ -383,6 +396,8 @@ export function calcMetrics(orders: Order[], adSpend: AdSpend[], expenses: Expen
   const margin = revenue > 0 ? (netProfit / revenue) * 100 : 0
 
   return {
+    gmv,
+    sellerDiscount,
     revenue,
     orders: completedOrders.length,
     cogs,
