@@ -38,6 +38,8 @@ interface Order {
   seller_discount: number | null
   voucher_from_seller: number | null
   voucher_from_shopee: number | null
+  gmv: number | null
+  escrow_amount: number | null
   payment_method: string | null
   item_list: OrderItem[] | null
 }
@@ -126,17 +128,33 @@ function OrderRow({ order }: { order: Order }) {
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Financial Breakdown</p>
                 <div className="space-y-0.5">
-                  <FinancialRow label="Total Amount" value={order.total_amount} />
-                  <FinancialRow label="Seller Discount" value={order.seller_discount} highlight="deduction" />
-                  <FinancialRow label="Voucher (Seller)" value={order.voucher_from_seller} highlight="deduction" />
-                  <FinancialRow label="Voucher (Shopee)" value={order.voucher_from_shopee} />
+                  {(order.gmv ?? 0) > 0 && (
+                    <>
+                      <div className="flex justify-between text-xs py-0.5">
+                        <span className="text-blue-600 font-medium">GMV (Penjualan)</span>
+                        <span className="font-mono text-blue-600">{formatCurrency(order.gmv ?? 0)}</span>
+                      </div>
+                      <FinancialRow label="  Voucher (Shopee)" value={order.voucher_from_shopee} highlight="deduction" />
+                      <div className="border-t my-1" />
+                    </>
+                  )}
+                  <FinancialRow label="Revenue (Buyer Paid)" value={order.buyer_paid_amount ?? order.revenue} />
+                  <FinancialRow label="  Seller Discount" value={order.seller_discount} highlight="deduction" />
+                  <FinancialRow label="  Voucher (Seller)" value={order.voucher_from_seller} highlight="deduction" />
+                  <FinancialRow label="  Shipping Fee" value={order.actual_shipping_fee ?? order.shipping_fee} highlight="deduction" />
+                  <FinancialRow label="  Commission Fee" value={order.commission_fee ?? order.platform_fee} highlight="deduction" />
+                  <FinancialRow label="  Service Fee" value={order.service_fee} highlight="deduction" />
+                  {(order.escrow_amount ?? 0) > 0 && (
+                    <>
+                      <div className="border-t my-1" />
+                      <div className="flex justify-between text-xs py-0.5">
+                        <span className="text-orange-600 font-medium">Escrow (to bank)</span>
+                        <span className="font-mono text-orange-600">{formatCurrency(order.escrow_amount ?? 0)}</span>
+                      </div>
+                    </>
+                  )}
                   <div className="border-t my-1" />
-                  <FinancialRow label="Buyer Paid Amount" value={order.buyer_paid_amount ?? order.revenue} />
-                  <div className="border-t my-1" />
-                  <FinancialRow label="Shipping Fee" value={order.actual_shipping_fee ?? order.shipping_fee} highlight="deduction" />
-                  <FinancialRow label="Commission Fee" value={order.commission_fee ?? order.platform_fee} highlight="deduction" />
-                  <FinancialRow label="Service Fee" value={order.service_fee} highlight="deduction" />
-                  <FinancialRow label="COGS" value={order.cogs} highlight="deduction" />
+                  <FinancialRow label="  COGS" value={order.cogs} highlight="deduction" />
                   <div className="border-t my-1" />
                   <div className="flex justify-between text-xs py-0.5 font-semibold">
                     <span>Net Profit</span>

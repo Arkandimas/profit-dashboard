@@ -23,9 +23,10 @@ export async function GET(request: Request) {
     // Fetch shop name for display
     let shopName = 'My Shopee Store'
     try {
-      const info = await getShopInfo(tokens.access_token, shopId)
-      if (info.shop_name && info.shop_name !== 'Unknown') {
-        shopName = info.shop_name
+      const info = await getShopInfo(tokens.access_token, shopId) as any
+      const parsedName = info.shop_info?.shop_name || info.response?.shop_name || info.shop_name
+      if (parsedName && parsedName !== 'Unknown') {
+        shopName = parsedName
       }
     } catch {
       // non-fatal — proceed without shop name

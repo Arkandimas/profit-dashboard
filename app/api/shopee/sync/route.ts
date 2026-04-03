@@ -34,48 +34,9 @@ export async function POST(request: Request) {
 
     // 1. Fetch order summaries across all chunks
     const seenSns = new Set<string>()
-    let currentAccessToken = accessToken
-    let retriedRefresh = false
-
     for (const chunk of chunks) {
-      try {
-        const summaries = await getOrderList(currentAccessToken, shopId, chunk.start, chunk.end)
-        for (const o of summaries) seenSns.add(o.order_sn)
-      } catch (err: any) {
-        if (!retriedRefresh && (err.message?.includes('403') || err.message?.includes('error_auth'))) {
-          // Attempt to refresh
-          const origin = new URL(request.url).origin
-          const cookieHeader = request.headers.get('cookie') || ''
-          const refreshRes = await fetch(`${origin}/api/shopee/refresh`, { 
-            method: 'POST', 
-            headers: { cookie: cookieHeader } 
-          })
-          
-          if (!refreshRes.ok) {
-            throw new Error('Shopee session expired. Please reconnect in Settings.')
-          }
-          
-          // To use the new access token immediately, we need to extract it from the Set-Cookie header
-          // Alternatively, we can just reload the jar (but Next.js cookies might not reflect fetch side-effects)
-          // Let's parse the Set-Cookie for shopee_access_token
-          const setCookies = refreshRes.headers.getSetCookie()
-          let newAccessToken = currentAccessToken
-          for (const sc of setCookies) {
-            if (sc.startsWith('shopee_access_token=')) {
-              newAccessToken = sc.split(';')[0].split('=')[1]
-            }
-          }
-          
-          currentAccessToken = newAccessToken
-          retriedRefresh = true
-          
-          // Retry this chunk
-          const summaries = await getOrderList(currentAccessToken, shopId, chunk.start, chunk.end)
-          for (const o of summaries) seenSns.add(o.order_sn)
-        } else {
-          throw err
-        }
-      }
+      const summaries = await getOrderList(accessToken, shopId, chunk.start, chunk.end)
+      for (const o of summaries) seenSns.add(o.order_sn)
     }
 
     if (seenSns.size === 0) {
@@ -89,47 +50,29 @@ export async function POST(request: Request) {
     const details = []
     for (let i = 0; i < orderSnList.length; i += BATCH_SIZE) {
       const batch = orderSnList.slice(i, i + BATCH_SIZE)
-      const batchDetails = await getOrderDetail(batch, currentAccessToken, shopId)
+      const batchDetails = await getOrderDetail(batch, accessToken, shopId)
       details.push(...batchDetails)
     }
 
     // 3. Upsert into Supabase — order_id is the conflict key (no duplicates)
     const rows = details.map((order) => {
-      const buyer_paid_amount = order.buyer_paid_amount ?? order.total_amount ?? 0
-      const total_amount = order.total_amount ?? 0
+      const revenue = order.total_amount
       const cogs = 0 // user sets COGS per product manually
-      const actual_shipping_fee = order.actual_shipping_fee ?? 0
-      const commission_fee = order.commission_fee ?? 0
-      const service_fee = order.service_fee ?? 0
-      const seller_discount = order.seller_discount ?? 0
-      const voucher_from_seller = order.voucher_from_seller ?? 0
-      const voucher_from_shopee = order.voucher_from_shopee ?? 0
-      // Revenue = what buyer paid; net_profit excludes voucher_from_shopee (Shopee covers it)
-      const revenue = buyer_paid_amount
-      const net_profit = buyer_paid_amount - cogs - actual_shipping_fee - commission_fee - service_fee - voucher_from_seller
+      const shipping_fee = order.actual_shipping_fee ?? 0
+      const platform_fee = order.commission_fee ?? 0
+      const net_profit = revenue - cogs - shipping_fee - platform_fee
       const payTime = order.pay_time && order.pay_time > 0 ? order.pay_time : null
       return {
         platform: 'Shopee' as const,
         order_id: order.order_sn,
         revenue,
         cogs,
-        shipping_fee: actual_shipping_fee,
-        platform_fee: commission_fee,
+        shipping_fee,
+        platform_fee,
         net_profit,
         status: order.order_status?.toLowerCase() ?? 'unknown',
         created_at: new Date(order.create_time * 1000).toISOString(),
         paid_at: payTime ? new Date(payTime * 1000).toISOString() : null,
-        // Extended financial fields
-        total_amount,
-        buyer_paid_amount,
-        actual_shipping_fee,
-        commission_fee,
-        service_fee,
-        seller_discount,
-        voucher_from_seller,
-        voucher_from_shopee,
-        payment_method: order.payment_method ?? null,
-        item_list: order.item_list ?? order.items ?? [],
       }
     })
 

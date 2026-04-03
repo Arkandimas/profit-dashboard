@@ -316,15 +316,10 @@ export function orderCountsForShopeeKpi(status: string | null | undefined): bool
 
 export function calcMetrics(orders: Order[], adSpend: AdSpend[], expenses: Expense[]) {
   const completedOrders = orders.filter((o) => orderCountsForShopeeKpi(o.status))
-  // Prefer buyer_paid_amount (the accurate Shopee figure) with revenue as fallback
-  const revenue = completedOrders.reduce((s, o) => s + (o.buyer_paid_amount ?? o.revenue ?? 0), 0)
-  const cogs = completedOrders.reduce((s, o) => s + (o.cogs ?? 0), 0)
-  // Prefer the granular fee columns when present
-  const shippingCost = completedOrders.reduce((s, o) => s + (o.actual_shipping_fee ?? o.shipping_fee ?? 0), 0)
-  const platformFees = completedOrders.reduce(
-    (s, o) => s + (o.commission_fee ?? o.platform_fee ?? 0) + (o.service_fee ?? 0),
-    0
-  )
+  const revenue = completedOrders.reduce((s, o) => s + o.revenue, 0)
+  const cogs = completedOrders.reduce((s, o) => s + o.cogs, 0)
+  const shippingCost = completedOrders.reduce((s, o) => s + o.shipping_fee, 0)
+  const platformFees = completedOrders.reduce((s, o) => s + o.platform_fee, 0)
   const shopeeAdsExpenses = expenses
     .filter((e) => e.category === 'Shopee Ads')
     .reduce((s, e) => s + e.amount, 0)

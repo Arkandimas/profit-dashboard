@@ -177,10 +177,7 @@ export interface ShopeeOrderDetail {
   update_time: number
   /** Unix seconds; use for seller-center style “paid order” day bucketing (GMT+7 in UI). */
   pay_time?: number
-  /** Original order total before seller discounts/vouchers */
   total_amount: number
-  /** Actual amount paid by buyer (what gets deposited to seller) */
-  buyer_paid_amount: number
   buyer_user_id: number
   items: Array<{
     item_id: number
@@ -192,19 +189,6 @@ export interface ShopeeOrderDetail {
   }>
   actual_shipping_fee: number
   commission_fee: number
-  service_fee: number
-  seller_discount: number
-  voucher_from_seller: number
-  voucher_from_shopee: number
-  payment_method?: string
-  item_list?: Array<{
-    item_id: number
-    item_name: string
-    item_sku: string
-    model_quantity_purchased: number
-    model_original_price: number
-    model_discounted_price: number
-  }>
 }
 
 // Shopee API allows max 15 days per getOrderList request.
@@ -359,7 +343,7 @@ export async function getOrderDetail(
     {
       order_sn_list: orderSnList.join(','),
       response_optional_fields:
-        'buyer_user_id,items,item_list,actual_shipping_fee,commission_fee,service_fee,seller_discount,voucher_from_seller,voucher_from_shopee,total_amount,buyer_paid_amount,pay_time,payment_method',
+        'buyer_user_id,items,actual_shipping_fee,commission_fee,total_amount,pay_time',
     },
     accessToken,
     shopId

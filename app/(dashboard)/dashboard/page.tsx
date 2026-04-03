@@ -71,7 +71,8 @@ export default function DashboardPage() {
     fetch('/api/orders?days=90')
       .then((r) => r.json())
       .then((data) => {
-        if (Array.isArray(data) && data.length > 0) setLiveOrders(data)
+        // Always set state (even if empty) so we never fall back to dummy data.
+        setLiveOrders(Array.isArray(data) ? data : [])
       })
       .catch(() => {/* keep dummy */})
   }, [])
@@ -86,12 +87,14 @@ export default function DashboardPage() {
   async function handleShopeeSync() {
     setSyncStatus({ state: 'loading' })
     try {
-      const res = await fetch('/api/shopee/sync', { method: 'POST' })
+      // Sync enough history so "paid order" reporting won't miss orders
+      // that were created earlier than the current window.
+      const res = await fetch('/api/shopee/sync?days=90', { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Sync failed')
       setSyncStatus({ state: 'success', count: data.synced })
       const ord = await fetch('/api/orders?days=90').then((r) => r.json())
-      if (Array.isArray(ord) && ord.length > 0) setLiveOrders(ord)
+      setLiveOrders(Array.isArray(ord) ? ord : [])
     } catch (err) {
       setSyncStatus({ state: 'error', message: err instanceof Error ? err.message : 'Sync failed' })
     } finally {
@@ -102,8 +105,8 @@ export default function DashboardPage() {
   const { from, to } = useMemo(() => getDateRange(datePreset), [datePreset])
   const prev = useMemo(() => getPreviousPeriod(from, to), [from, to])
 
-  // Use live Supabase orders when available, fall back to demo data
-  const allOrders = liveOrders ?? dummyOrders
+  // Use only live Supabase orders for realtime correctness.
+  const allOrders = liveOrders ?? []
 
   const filteredOrders = useMemo(() => {
     let orders = filterOrdersByReportDate(allOrders, from, to)
@@ -398,12 +401,7 @@ export default function DashboardPage() {
               </thead>
               <tbody>
                 {recentOrders.map((order) => {
-                  // Prefer the stored net_profit (synced from Shopee); fall back to computed
-                  const netProfit =
-                    order.net_profit != null
-                      ? order.net_profit
-                      : order.revenue - order.cogs - order.shipping_fee - order.platform_fee
-                  const displayRevenue = order.buyer_paid_amount ?? order.revenue
+                  const netProfit = order.revenue - order.cogs - order.shipping_fee - order.platform_fee
                   return (
                     <tr key={order.id} className="border-b last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/30">
                       <td className="px-4 py-3 font-mono text-xs">{order.order_id}</td>
@@ -419,7 +417,7 @@ export default function DashboardPage() {
                           {order.platform}
                         </Badge>
                       </td>
-                      <td className="px-4 py-3 text-right">{formatCurrency(displayRevenue)}</td>
+                      <td className="px-4 py-3 text-right">{formatCurrency(order.revenue)}</td>
                       <td className="px-4 py-3 text-right text-muted-foreground">{formatCurrency(order.cogs)}</td>
                       <td className={`px-4 py-3 text-right font-medium ${netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {formatCurrency(netProfit)}
