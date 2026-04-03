@@ -179,7 +179,12 @@ export interface ShopeeOrderDetail {
   pay_time?: number
   total_amount: number
   buyer_user_id: number
-  items: Array<{
+  /**
+   * Field name in Shopee API v2 response is `item_list` (NOT `items`).
+   * Requested via response_optional_fields: 'item_list'.
+   * Contains per-line product pricing used to compute Shopee "Penjualan".
+   */
+  item_list: Array<{
     item_id: number
     item_name: string
     item_sku: string
@@ -232,9 +237,12 @@ export async function getOrderList(
 
     const url = buildUrl(path, params, accessToken, shopId)
     const res = await fetch(url)
-    if (!res.ok) throw new Error(`getOrderList HTTP ${res.status}`)
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(`getOrderList HTTP ${res.status}: ${body.message || body.error || 'unknown'}`)
+    }
     const data = await res.json()
-    if (data.error && data.error !== '') throw new Error(`getOrderList: ${data.message}`)
+    if (data.error && data.error !== '') throw new Error(`getOrderList: ${data.message || data.error}`)
 
     const list: ShopeeOrderSummary[] = data.response?.order_list ?? []
     all.push(...list)
@@ -343,15 +351,18 @@ export async function getOrderDetail(
     {
       order_sn_list: orderSnList.join(','),
       response_optional_fields:
-        'buyer_user_id,items,actual_shipping_fee,commission_fee,total_amount,pay_time',
+        'buyer_user_id,item_list,actual_shipping_fee,commission_fee,total_amount,pay_time',
     },
     accessToken,
     shopId
   )
 
   const res = await fetch(url)
-  if (!res.ok) throw new Error(`getOrderDetail HTTP ${res.status}`)
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(`getOrderDetail HTTP ${res.status}: ${body.message || body.error || 'unknown'}`)
+  }
   const data = await res.json()
-  if (data.error && data.error !== '') throw new Error(`getOrderDetail: ${data.message}`)
+  if (data.error && data.error !== '') throw new Error(`getOrderDetail: ${data.message || data.error}`)
   return data.response?.order_list ?? []
 }

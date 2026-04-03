@@ -260,32 +260,66 @@ export function filterOrdersByReportDate<T extends { created_at: string; paid_at
   })
 }
 
+// ── Timezone-aware date helpers (Asia/Jakarta = GMT+7) ────────────────────────
+// Shopee Seller Center uses WIB (GMT+7) for all date reporting.
+// All start-of-day / end-of-day boundaries must be anchored to that timezone
+// so that "Yesterday" and other presets match Seller Center exactly.
+
+/** Returns 'YYYY-MM-DD' string of the current date in Jakarta (WIB, GMT+7). */
+function jakartaTodayStr(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' })
+}
+
+/**
+ * Returns a Date representing start-of-day (00:00:00 WIB) for the given
+ * 'YYYY-MM-DD' Jakarta date string.  When passed through ymdInJakarta() it
+ * will resolve back to the same dateStr.
+ */
+function jakartaDayStart(dateStr: string): Date {
+  return new Date(`${dateStr}T00:00:00+07:00`)
+}
+
+/** Returns a Date representing end-of-day (23:59:59 WIB) for the given Jakarta date string. */
+function jakartaDayEnd(dateStr: string): Date {
+  return new Date(`${dateStr}T23:59:59+07:00`)
+}
+
+/** Shifts a YYYY-MM-DD Jakarta date string by N calendar days. */
+function shiftJakartaDate(dateStr: string, days: number): string {
+  // Anchor to noon WIB to avoid DST edge cases (Jakarta has no DST, but safe habit)
+  const d = new Date(`${dateStr}T12:00:00+07:00`)
+  d.setDate(d.getDate() + days)
+  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' })
+}
+
 // Helper: get date range
 export function getDateRange(preset: string): { from: Date; to: Date } {
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59)
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0)
+  const todayStr = jakartaTodayStr()
 
   switch (preset) {
     case 'today':
-      return { from: todayStart, to: today }
+      return { from: jakartaDayStart(todayStr), to: jakartaDayEnd(todayStr) }
     case 'yesterday': {
-      const y = new Date(todayStart)
-      y.setDate(y.getDate() - 1)
-      const yEnd = new Date(today)
-      yEnd.setDate(yEnd.getDate() - 1)
-      return { from: y, to: yEnd }
+      const yStr = shiftJakartaDate(todayStr, -1)
+      return { from: jakartaDayStart(yStr), to: jakartaDayEnd(yStr) }
     }
-    case 'last7':
-      return { from: addDays(todayStart, -6), to: today }
-    case 'last30':
-      return { from: addDays(todayStart, -29), to: today }
+    case 'last7': {
+      const startStr = shiftJakartaDate(todayStr, -6)
+      return { from: jakartaDayStart(startStr), to: jakartaDayEnd(todayStr) }
+    }
+    case 'last30': {
+      const startStr = shiftJakartaDate(todayStr, -29)
+      return { from: jakartaDayStart(startStr), to: jakartaDayEnd(todayStr) }
+    }
     case 'thisMonth': {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1)
-      return { from: start, to: today }
+      const [y, m] = todayStr.split('-')
+      const startStr = `${y}-${m}-01`
+      return { from: jakartaDayStart(startStr), to: jakartaDayEnd(todayStr) }
     }
-    default:
-      return { from: addDays(todayStart, -29), to: today }
+    default: {
+      const startStr = shiftJakartaDate(todayStr, -29)
+      return { from: jakartaDayStart(startStr), to: jakartaDayEnd(todayStr) }
+    }
   }
 }
 
@@ -298,13 +332,31 @@ export function getPreviousPeriod(from: Date, to: Date): { from: Date; to: Date 
 }
 
 /**
- * Orders counted for revenue / orders KPI (closer to Shopee “Pesanan Dibayar” / paid flow).
- * Excludes unpaid, in-cancel, cancelled, and post-sale voids.
+ * Orders counted for Shopee "Pesanan Dibayar" (Paid Orders) KPI.
+ *
+ * Shopee Seller Center counts an order as "paid" once payment is confirmed,
+ * regardless of fulfillment state. This matches the statuses that appear in
+ * the Seller Center "Pesanan Dibayar" report:
+ *
+ *   ✓ ready_to_ship  — payment confirmed, awaiting shipment
+ *   ✓ processed      — being prepared for shipment
+ *   ✓ retry_ship     — re-arranging shipping
+ *   ✓ shipped        — in transit
+ *   ✓ to_confirm_receive — delivered, awaiting buyer confirmation
+ *   ✓ completed      — fully completed
+ *   ✓ in_cancel      — cancellation requested BUT payment WAS confirmed;
+ *                      Shopee still counts it in "Pesanan Dibayar"
+ *   ✓ to_return      — buyer requesting return; payment was received
+ *
+ *   ✗ unpaid         — checkout started but NOT paid yet
+ *   ✗ cancelled      — confirmed cancellation (no payment settled)
+ *   ✗ canceled       — alias for cancelled
+ *   ✗ returned       — return completed (refunded)
+ *   ✗ refunded       — refund issued
  */
 export function orderCountsForShopeeKpi(status: string | null | undefined): boolean {
   const excluded = new Set([
     'unpaid',
-    'in_cancel',
     'cancelled',
     'canceled',
     'returned',
