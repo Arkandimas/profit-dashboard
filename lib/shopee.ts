@@ -366,3 +366,42 @@ export async function getOrderDetail(
   if (data.error && data.error !== '') throw new Error(`getOrderDetail: ${data.message || data.error}`)
   return data.response?.order_list ?? []
 }
+
+// ─── Payment / Escrow API ─────────────────────────────────────────────────────
+
+export interface ShopeeEscrowDetail {
+  order_sn: string
+  order_income?: {
+    escrow_amount?: number
+    buyer_paid_amount?: number
+    buyer_total_amount?: number
+    commission_fee?: number
+    service_fee?: number
+    order_income?: number
+    voucher_from_seller?: number
+    voucher_from_shopee?: number
+    seller_discount?: number
+    shopee_discount?: number
+    coins?: number
+  }
+}
+
+export async function getEscrowDetail(
+  orderSn: string,
+  accessToken: string,
+  shopId: number
+): Promise<ShopeeEscrowDetail> {
+  const path = '/api/v2/payment/get_escrow_detail'
+  const url = buildUrl(path, { order_sn: orderSn }, accessToken, shopId)
+  const res = await fetch(url)
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(`getEscrowDetail HTTP ${res.status}: ${body.message || body.error || 'unknown'}`)
+  }
+  const data = await res.json()
+  if (data.error && data.error !== '') throw new Error(`getEscrowDetail: ${data.message || data.error}`)
+  return {
+    order_sn: orderSn,
+    order_income: data.response?.order_income ?? {},
+  }
+}
