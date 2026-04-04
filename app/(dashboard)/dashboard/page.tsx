@@ -16,7 +16,7 @@ import {
   BarChart,
   Bar,
 } from 'recharts'
-import { DollarSign, ShoppingCart, TrendingUp, Percent, Package, Megaphone, RefreshCw, Tag } from 'lucide-react'
+import { DollarSign, ShoppingCart, TrendingUp, Percent, Package, Megaphone, RefreshCw, Tag, Database } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -50,12 +50,14 @@ type ChartMetric = (typeof CHART_METRICS)[number]
 const PIE_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6']
 
 type SyncStatus = { state: 'idle' } | { state: 'loading' } | { state: 'success'; count: number } | { state: 'error'; message: string }
+type EscrowSyncStatus = { state: 'idle' } | { state: 'loading' } | { state: 'success'; count: number } | { state: 'error'; message: string }
 
 export default function DashboardPage() {
   const [datePreset, setDatePreset] = useState('last30')
   const [platform, setPlatform] = useState<PlatformFilter>('Shopee')
   const [chartMetric, setChartMetric] = useState<ChartMetric>('GMV')
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ state: 'idle' })
+  const [escrowSyncStatus, setEscrowSyncStatus] = useState<EscrowSyncStatus>({ state: 'idle' })
   const [shopeeConnected, setShopeeConnected] = useState<boolean | null>(null)
   const [liveOrders, setLiveOrders] = useState<typeof dummyOrders | null>(null)
   const [liveAdSpend, setLiveAdSpend] = useState<AdSpend[]>([])
@@ -101,6 +103,22 @@ export default function DashboardPage() {
       setSyncStatus({ state: 'error', message: err instanceof Error ? err.message : 'Sync failed' })
     } finally {
       setTimeout(() => setSyncStatus({ state: 'idle' }), 4000)
+    }
+  }
+
+  async function handleEscrowSync() {
+    setEscrowSyncStatus({ state: 'loading' })
+    try {
+      const res = await fetch('/api/shopee/sync-escrow', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Escrow sync failed')
+      setEscrowSyncStatus({ state: 'success', count: data.synced_escrow })
+      const ord = await fetch('/api/orders?days=90').then((r) => r.json())
+      setLiveOrders(Array.isArray(ord) ? ord : [])
+    } catch (err) {
+      setEscrowSyncStatus({ state: 'error', message: err instanceof Error ? err.message : 'Failed' })
+    } finally {
+      setTimeout(() => setEscrowSyncStatus({ state: 'idle' }), 4000)
     }
   }
 
@@ -186,33 +204,53 @@ export default function DashboardPage() {
     return `${((paidOrders / denom) * 100).toFixed(1)}% paid rate`
   }, [paidOrders, cancelledOrders])
 
-  const platformFees = useMemo(
-    () => filteredOrders.reduce((s, o) => s + (Number(o.commission_fee) || 0) + (Number(o.service_fee) || 0), 0),
+  // Escrow-aware fee breakdown — uses real values when escrow_synced = true
+  const escrowSyncedCount = useMemo(
+    () => filteredOrders.filter((o) => o.escrow_synced).length,
     [filteredOrders]
+  )
+
+  const { commissionTotal, serviceFeeTotal, amsTotal, processingTotal } = useMemo(() => {
+    const paid = filteredOrders.filter((o) => orderCountsForShopeeKpi(o.status))
+    return {
+      commissionTotal: paid.reduce((s, o) =>
+        s + (o.escrow_synced ? (o.commission_fee_actual ?? 0) : (Number(o.commission_fee) || 0)), 0),
+      serviceFeeTotal: paid.reduce((s, o) =>
+        s + (o.escrow_synced ? (o.service_fee_actual ?? 0) : (Number(o.service_fee) || 0)), 0),
+      amsTotal: paid.reduce((s, o) => s + (o.ams_commission ?? 0), 0),
+      processingTotal: paid.reduce((s, o) => s + (o.processing_fee ?? 0), 0),
+    }
+  }, [filteredOrders])
+
+  const platformFees = useMemo(
+    () => commissionTotal + serviceFeeTotal + amsTotal + processingTotal,
+    [commissionTotal, serviceFeeTotal, amsTotal, processingTotal]
   )
   const netRevenue = useMemo(() => metrics.revenue - platformFees, [metrics.revenue, platformFees])
   const netProfit = useMemo(() => netRevenue - metrics.cogs - metrics.adSpendTotal, [netRevenue, metrics.cogs, metrics.adSpendTotal])
 
-  // Waterfall breakdown data: GMV → Diskon → Revenue → COGS → Ongkir → Komisi → Iklan → Net Profit
+  // Waterfall breakdown: GMV → Diskon → Revenue → Komisi → Serv.Fee → AMS → Proc.Fee → COGS → Profit
   const waterfallData = useMemo(() => {
     const rev = metrics.revenue
     const cg = metrics.cogs
-    const ship = metrics.shippingCost
-    const komisi = platformFees
-    const iklan = metrics.adSpendTotal
+    const commission = commissionTotal
+    const svc = serviceFeeTotal
+    const ams = amsTotal
+    const proc = processingTotal
     const discount = Math.max(0, gmvTotal - rev)
-    const profit = rev - cg - ship - komisi - iklan
+    const profit = rev - commission - svc - ams - proc - cg
     return [
-      { name: 'GMV',    base: 0,                                              value: gmvTotal,         fill: '#6366f1' },
-      { name: 'Diskon', base: rev,                                             value: discount,         fill: '#f59e0b' },
-      { name: 'Revenue',base: 0,                                               value: rev,              fill: '#3b82f6' },
-      { name: 'COGS',   base: Math.max(0, rev - cg),                           value: cg,               fill: '#ef4444' },
-      { name: 'Ongkir', base: Math.max(0, rev - cg - ship),                   value: ship,             fill: '#ef4444' },
-      { name: 'Komisi', base: Math.max(0, rev - cg - ship - komisi),          value: komisi,           fill: '#ef4444' },
-      { name: 'Iklan',  base: Math.max(0, rev - cg - ship - komisi - iklan),  value: iklan,            fill: '#ef4444' },
-      { name: 'Profit', base: 0,                                               value: Math.abs(profit), fill: profit >= 0 ? '#10b981' : '#ef4444' },
+      { name: 'GMV',      base: 0,                                                       value: gmvTotal,         fill: '#6366f1' },
+      { name: 'Diskon',   base: rev,                                                      value: discount,         fill: '#f59e0b' },
+      { name: 'Revenue',  base: 0,                                                        value: rev,              fill: '#3b82f6' },
+      { name: 'Komisi',   base: Math.max(0, rev - commission),                            value: commission,       fill: '#ef4444' },
+      { name: 'Serv.Fee', base: Math.max(0, rev - commission - svc),                     value: svc,              fill: '#ef4444' },
+      { name: 'AMS',      base: Math.max(0, rev - commission - svc - ams),               value: ams,              fill: '#f97316' },
+      { name: 'Proc.Fee', base: Math.max(0, rev - commission - svc - ams - proc),        value: proc,             fill: '#ef4444' },
+      { name: 'COGS',     base: Math.max(0, rev - commission - svc - ams - proc - cg),  value: cg,               fill: '#ef4444' },
+      { name: 'Profit',   base: 0,                                                        value: Math.abs(profit), fill: profit >= 0 ? '#10b981' : '#ef4444' },
     ]
-  }, [gmvTotal, metrics, platformFees])
+  }, [gmvTotal, metrics.revenue, metrics.cogs, commissionTotal, serviceFeeTotal, amsTotal, processingTotal])
 
   // Pie data — Shopee Ads shown as separate slice from general Ad Spend
   const pieData = [
@@ -246,7 +284,9 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-bold">Dashboard</h1>
           <p className="text-muted-foreground text-sm">
-            {liveOrders ? `Live data · ${liveOrders.length} orders synced` : 'Demo data'}
+            {liveOrders
+              ? `Live data · ${liveOrders.length} orders synced${escrowSyncedCount > 0 ? ` · ${escrowSyncedCount} escrow-verified` : ''}`
+              : 'Demo data'}
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
@@ -260,6 +300,16 @@ export default function DashboardPage() {
               ✕ {syncStatus.message}
             </span>
           )}
+          {escrowSyncStatus.state === 'success' && (
+            <span className="text-sm text-blue-600 font-medium">
+              ✓ {escrowSyncStatus.count} escrow synced
+            </span>
+          )}
+          {escrowSyncStatus.state === 'error' && (
+            <span className="text-sm text-red-600 font-medium" title={escrowSyncStatus.message}>
+              ✕ {escrowSyncStatus.message}
+            </span>
+          )}
           {shopeeConnected === true && (
             <Button
               variant="outline"
@@ -270,6 +320,18 @@ export default function DashboardPage() {
             >
               <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${syncStatus.state === 'loading' ? 'animate-spin' : ''}`} />
               {syncStatus.state === 'loading' ? 'Syncing…' : 'Sync Shopee'}
+            </Button>
+          )}
+          {shopeeConnected === true && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleEscrowSync}
+              disabled={escrowSyncStatus.state === 'loading'}
+              className="border-blue-200 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+            >
+              <Database className={`w-3.5 h-3.5 mr-1.5 ${escrowSyncStatus.state === 'loading' ? 'animate-spin' : ''}`} />
+              {escrowSyncStatus.state === 'loading' ? 'Syncing…' : 'Sync Escrow'}
             </Button>
           )}
           <DateRangePicker value={datePreset} onChange={setDatePreset} />
@@ -324,9 +386,12 @@ export default function DashboardPage() {
             icon={<DollarSign className="w-4 h-4" />}
           />
           <KpiCard
-            title="Platform Fee"
+            title={escrowSyncedCount > 0 ? 'Platform Fee ✓' : 'Platform Fee (est.)'}
             value={formatCurrency(platformFees)}
             icon={<Megaphone className="w-4 h-4" />}
+            tooltip={escrowSyncedCount > 0
+              ? `Escrow-verified: ${escrowSyncedCount} orders. Commission + Service + AMS + Processing fee.`
+              : 'Estimated from 3% commission rate. Run "Sync Escrow" for real figures.'}
           />
           <KpiCard
             title="Net Revenue"

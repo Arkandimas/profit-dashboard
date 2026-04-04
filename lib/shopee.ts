@@ -369,21 +369,43 @@ export async function getOrderDetail(
 
 // ─── Payment / Escrow API ─────────────────────────────────────────────────────
 
+/** Full order_income object from GET /api/v2/payment/get_escrow_detail */
+export interface ShopeeEscrowIncome {
+  escrow_amount?: number
+  buyer_paid_amount?: number
+  buyer_total_amount?: number
+  commission_fee?: number
+  service_fee?: number
+  /** Shopee Ads (AMS) fee deducted per order */
+  order_ams_commission_fee?: number
+  /** Per-order seller processing fee */
+  seller_order_processing_fee?: number
+  actual_shipping_fee?: number
+  /** Shipping subsidy paid by Shopee (usually equals actual_shipping_fee) */
+  shopee_shipping_rebate?: number
+  buyer_paid_shipping_fee?: number
+  /** Voucher funded by the seller — real cost to seller */
+  voucher_from_seller?: number
+  /** Voucher funded by Shopee — informational only, not a seller cost */
+  voucher_from_shopee?: number
+  seller_discount?: number
+  order_selling_price?: number
+  original_price?: number
+  order_income?: number
+  coins?: number
+  shopee_discount?: number
+  items?: Array<{
+    item_id?: number
+    item_name?: string
+    order_item_id?: number
+    sku?: string
+    model_id?: number
+  }>
+}
+
 export interface ShopeeEscrowDetail {
   order_sn: string
-  order_income?: {
-    escrow_amount?: number
-    buyer_paid_amount?: number
-    buyer_total_amount?: number
-    commission_fee?: number
-    service_fee?: number
-    order_income?: number
-    voucher_from_seller?: number
-    voucher_from_shopee?: number
-    seller_discount?: number
-    shopee_discount?: number
-    coins?: number
-  }
+  order_income?: ShopeeEscrowIncome
 }
 
 export async function getEscrowDetail(

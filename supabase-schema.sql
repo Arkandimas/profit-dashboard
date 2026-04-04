@@ -2,11 +2,21 @@ CREATE TABLE orders (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   platform text NOT NULL CHECK (platform IN ('Shopee', 'TikTok Shop')),
   order_id text UNIQUE NOT NULL,
+  -- Shopee Seller Centre "Penjualan" (GMV) = sum(item_price * qty)
+  gmv numeric(12,2) DEFAULT 0,
+  -- Buyer-paid amount from escrow detail (when available)
+  buyer_paid_amount numeric(12,2) DEFAULT 0,
+  -- Voucher/discount total (best-effort; from escrow detail when available)
+  voucher_amount numeric(12,2) DEFAULT 0,
   revenue numeric(12,2) DEFAULT 0,
   cogs numeric(12,2) DEFAULT 0,
   shipping_fee numeric(12,2) DEFAULT 0,
   platform_fee numeric(12,2) DEFAULT 0,
+  commission_fee numeric(12,2) DEFAULT 0,
+  service_fee numeric(12,2) DEFAULT 0,
   ad_spend numeric(12,2) DEFAULT 0,
+  -- Escrow income to seller (best-effort; from escrow detail when available)
+  escrow_amount numeric(12,2) DEFAULT 0,
   net_profit numeric(12,2) DEFAULT 0,
   status text DEFAULT 'completed',
   created_at timestamptz DEFAULT now(),

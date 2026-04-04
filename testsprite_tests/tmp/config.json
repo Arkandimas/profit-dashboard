@@ -1,0 +1,19 @@
+{
+  "status": "commited",
+  "type": "backend",
+  "scope": "diff",
+  "localEndpoint": "http://localhost:3000/dashboard",
+  "backendAuthType": "public",
+  "executionArgs": {
+    "projectName": "profit-dashboard",
+    "projectPath": "/Users/arkandimaspratama/profit-dashboard",
+    "testIds": [],
+    "additionalInstruction": "",
+    "serverMode": "development",
+    "envs": {
+      "API_KEY": "sk-user-MxcMlvlH2HrXpySY6ZOvRcBK1w4uKQ_2Jy2tYhsJMdXmKMdHOH0JEVja2X8cql2AXWbxaD7t4AqQjBmMAEVXjhJk3Mxs9zPB328qXKXrmYX5uS2u1NYjdR2N_SeJ1b7HlV0"
+    }
+  },
+  "serverPort": 56736,
+  "proxy": "http://6d726e10-a9db-486b-8709-c366c2da3cd2:fKHmEX9Y8W2eKdfVXZ5sYPKaD14OkKPX@tun.testsprite.com:8080"
+}

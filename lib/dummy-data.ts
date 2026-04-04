@@ -384,7 +384,20 @@ export function calcMetrics(orders: Order[], adSpend: AdSpend[], expenses: Expen
   const sellerDiscount = gmv - revenue
   const cogs = completedOrders.reduce((s, o) => s + o.cogs, 0)
   const shippingCost = completedOrders.reduce((s, o) => s + o.shipping_fee, 0)
-  const platformFees = completedOrders.reduce((s, o) => s + o.platform_fee, 0)
+
+  // Use real escrow fees when available; fall back to estimated platform_fee
+  const commissionFees = completedOrders.reduce((s, o) =>
+    s + (o.escrow_synced ? (o.commission_fee_actual ?? 0) : (o.commission_fee ?? 0)), 0)
+  const serviceFees = completedOrders.reduce((s, o) =>
+    s + (o.escrow_synced ? (o.service_fee_actual ?? 0) : (o.service_fee ?? 0)), 0)
+  const amsCommission = completedOrders.reduce((s, o) => s + (o.ams_commission ?? 0), 0)
+  const processingFees = completedOrders.reduce((s, o) => s + (o.processing_fee ?? 0), 0)
+  // platformFees: use escrow breakdown when available, else estimated platform_fee
+  const escrowSyncedCount = completedOrders.filter((o) => o.escrow_synced).length
+  const platformFees = escrowSyncedCount > 0
+    ? commissionFees + serviceFees + amsCommission + processingFees
+    : completedOrders.reduce((s, o) => s + o.platform_fee, 0)
+
   const shopeeAdsExpenses = expenses
     .filter((e) => e.category === 'Shopee Ads')
     .reduce((s, e) => s + e.amount, 0)
@@ -403,6 +416,11 @@ export function calcMetrics(orders: Order[], adSpend: AdSpend[], expenses: Expen
     cogs,
     shippingCost,
     platformFees,
+    commissionFees,
+    serviceFees,
+    amsCommission,
+    processingFees,
+    escrowSynced: escrowSyncedCount,
     adSpendTotal,
     shopeeAdsExpenses,
     otherExpenses,

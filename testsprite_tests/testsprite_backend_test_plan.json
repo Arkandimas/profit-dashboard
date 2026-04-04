@@ -1,0 +1,52 @@
+[
+  {
+    "id": "TC001",
+    "title": "get orders with valid days and platform",
+    "description": "Test the GET /api/orders endpoint with valid days and platform parameters to ensure it returns a 200 status and a list of orders filtered by the specified date range and platform, excluding non-revenue statuses."
+  },
+  {
+    "id": "TC002",
+    "title": "get orders with days exceeding maximum limit",
+    "description": "Test the GET /api/orders endpoint with a days parameter exceeding the allowed maximum (e.g., 200) to verify the server returns a 500 error with an appropriate error message."
+  },
+  {
+    "id": "TC003",
+    "title": "get orders with unsupported platform",
+    "description": "Test the GET /api/orders endpoint with an unsupported platform parameter to check if the response is either an empty list of orders or a 500 error if platform parsing fails."
+  },
+  {
+    "id": "TC004",
+    "title": "post shopee sync with valid cookies and days",
+    "description": "Test the POST /api/shopee/sync endpoint with valid shopee_access_token and shopee_shop_id cookies and a valid days parameter to ensure the server refreshes the token if needed, fetches orders and details, upserts them into Supabase, and returns a 200 status with sync details."
+  },
+  {
+    "id": "TC005",
+    "title": "post shopee sync without authentication cookies",
+    "description": "Test the POST /api/shopee/sync endpoint without the required shopee_access_token or shopee_shop_id cookies to verify the server responds with a 401 Not connected to Shopee error."
+  },
+  {
+    "id": "TC006",
+    "title": "post shopee sync with token refresh failure",
+    "description": "Test the POST /api/shopee/sync endpoint with valid cookies but simulate a failure in the Shopee token refresh process to ensure the server returns a 500 error and aborts the sync."
+  },
+  {
+    "id": "TC007",
+    "title": "post shopee sync with zero days parameter",
+    "description": "Test the POST /api/shopee/sync endpoint with valid cookies and a days parameter of zero to verify the server performs a minimal fetch and returns a 200 status with synced_count zero."
+  },
+  {
+    "id": "TC008",
+    "title": "get orders with valid days and all platforms",
+    "description": "Test the GET /api/orders endpoint with valid days parameter and platform set to 'All' to ensure it returns a 200 status and a list of orders across all platforms within the specified date range."
+  },
+  {
+    "id": "TC009",
+    "title": "get orders with invalid large days parameter from date range picker",
+    "description": "Test the GET /api/orders endpoint with an excessively large days parameter (e.g., 3650) from the DateRangePicker component to verify the server rejects the request with a 500 error and appropriate error message."
+  },
+  {
+    "id": "TC010",
+    "title": "post shopee sync with missing or invalid cookies from dashboard",
+    "description": "Test the POST /api/shopee/sync endpoint triggered from the dashboard with missing or invalid authentication cookies to ensure the server responds with a 401 error and the client shows a connection error prompting the user to connect Shopee in Settings."
+  }
+]

@@ -26,6 +26,16 @@ export interface Order {
   created_at: string
   /** When Shopee reports payment time; used for “paid order” date filters (seller center style). */
   paid_at?: string | null
+  // Escrow fields — populated after sync-escrow runs for completed orders
+  escrow_synced?: boolean
+  escrow_synced_at?: string | null
+  commission_fee_actual?: number   // real commission from escrow API
+  service_fee_actual?: number      // transaction service fee from escrow API
+  ams_commission?: number          // Shopee Ads (AMS) fee per order
+  processing_fee?: number          // seller order processing fee
+  shopee_shipping_rebate?: number  // shipping subsidy Shopee pays (informational)
+  voucher_from_seller?: number     // seller-funded voucher (real cost to seller)
+  voucher_from_shopee?: number     // Shopee-funded voucher (informational, not seller cost)
 }
 
 export interface Product {

@@ -1,0 +1,85 @@
+version: "2"
+type: backend
+tech_stack:
+  - TypeScript
+  - Next.js 16 (App Router)
+  - React 19
+  - Supabase (PostgreSQL)
+  - Shopee Open Platform API
+  - Recharts
+  - Tailwind CSS
+features:
+  - name: Orders Fetch API
+    description: Fetches orders from Supabase filtered by date window and platform, excluding non-revenue statuses
+    files:
+      - app/api/orders/route.ts
+    endpoints:
+      - method: GET
+        path: /api/orders
+        description: List orders from Supabase within a date window, filtered by platform
+        auth_required: false
+        request_schema:
+          query:
+            days: number (optional, default 90, max 100)
+            platform: string (optional, e.g. "Shopee")
+        response_schema:
+          "200": Order[]
+          "500": error message
+    depends_on:
+      - Supabase orders table
+
+  - name: Shopee Sync API
+    description: Syncs Shopee orders into Supabase via Shopee Open Platform API; auto-refreshes access token, fetches order list in chunked date ranges, fetches order details and escrow details, then upserts into Supabase
+    files:
+      - app/api/shopee/sync/route.ts
+      - lib/shopee.ts
+    endpoints:
+      - method: POST
+        path: /api/shopee/sync
+        description: Trigger a sync of Shopee orders for the last N days
+        auth_required: true
+        request_schema:
+          query:
+            days: number (optional, default 90, max 90)
+          cookies:
+            shopee_access_token: string
+            shopee_shop_id: string
+            shopee_refresh_token: string (optional)
+        response_schema:
+          "200": synced count, chunks count, days
+          "401": Not connected to Shopee
+          "500": error message
+    depends_on:
+      - Shopee Open Platform API
+      - Supabase orders table
+
+  - name: Dashboard Page with Metrics and Charts
+    description: Client-side dashboard showing profit KPIs (GMV, Revenue, Orders, profit margin), date-range filtering, platform filtering, sync trigger button, and bar/pie charts via Recharts
+    files:
+      - app/(dashboard)/dashboard/page.tsx
+      - components/date-range-picker.tsx
+      - lib/dummy-data.ts
+    depends_on:
+      - Orders Fetch API
+      - Shopee Sync API
+      - DateRangePicker Component
+
+  - name: DateRangePicker Component
+    description: Dropdown UI for selecting date presets (Today, Yesterday, Last 7/30 Days) or a custom date range, emits a string value used by the dashboard for filtering
+    files:
+      - components/date-range-picker.tsx
+    depends_on: []
+
+  - name: Supabase Client
+    description: Supabase client initialization using environment variables for URL and anon key
+    files:
+      - lib/supabase.ts
+    depends_on: []
+
+known_limitations:
+  - issue: Supabase anon key used in server-side API routes via NEXT_PUBLIC_ env vars
+    location: app/api/orders/route.ts, app/api/shopee/sync/route.ts
+    impact: Anon key is exposed client-side; service role key should be used for server routes
+  - issue: COGS is hardcoded to 0 for all orders
+    location: app/api/shopee/sync/route.ts
+    impact: Net profit calculation is inaccurate until user sets COGS manually
