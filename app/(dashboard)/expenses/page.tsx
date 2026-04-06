@@ -9,6 +9,12 @@ import { formatCurrency, orderCountsForShopeeKpi } from '@/lib/dummy-data'
 import type { Order } from '@/lib/supabase'
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns'
 
+function safeDate(raw: string | null | undefined) {
+  if (!raw) return null
+  const value = new Date(raw)
+  return Number.isNaN(value.getTime()) ? null : value
+}
+
 export default function ExpensesPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
@@ -57,7 +63,8 @@ export default function ExpensesPage() {
       const start = startOfMonth(date)
       const end = endOfMonth(date)
       const monthRows = feeOrders.filter((o) => {
-        const d = new Date(o.paid_at || o.created_at)
+        const d = safeDate(o.paid_at || o.created_at)
+        if (!d) return false
         return d >= start && d <= end
       })
       const shipping = monthRows.reduce((s, o) => s + (Number(o.shipping_fee) || 0), 0)
@@ -78,8 +85,8 @@ export default function ExpensesPage() {
     () =>
       [...feeOrders].sort(
         (a, b) =>
-          new Date(b.paid_at || b.created_at).getTime() -
-          new Date(a.paid_at || a.created_at).getTime()
+          (safeDate(b.paid_at || b.created_at)?.getTime() ?? 0) -
+          (safeDate(a.paid_at || a.created_at)?.getTime() ?? 0)
       ),
     [feeOrders]
   )
@@ -197,7 +204,10 @@ export default function ExpensesPage() {
                     return (
                       <tr key={o.id} className="border-b last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/30">
                         <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                          {format(new Date(o.paid_at || o.created_at), 'd MMM yyyy')}
+                          {(() => {
+                            const value = safeDate(o.paid_at || o.created_at)
+                            return value ? format(value, 'd MMM yyyy') : '—'
+                          })()}
                         </td>
                         <td className="px-4 py-3 font-mono text-xs">{o.order_id}</td>
                         <td className="px-4 py-3 text-right">{formatCurrency(ship)}</td>

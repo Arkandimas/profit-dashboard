@@ -1,0 +1,170 @@
+import { NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
+import { createClient } from '@supabase/supabase-js'
+import { getEscrowDetail, refreshAccessToken } from '@/lib/shopee'
+
+// Pro plan: up to 60s. Hobby plan: capped at 10s regardless.
+export const maxDuration = 60
+
+const supabase = createClient(
+  process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+
+const COOKIE_OPTS = {
+  path: '/',
+  sameSite: 'lax' as const,
+  secure: process.env.NODE_ENV === 'production',
+  httpOnly: true,
+  maxAge: 60 * 60 * 24 * 30,
+}
+
+// Only orders with settled payment have escrow data available
+const ESCROW_ELIGIBLE_STATUSES = ['completed', 'to_confirm_receive']
+
+// 5 concurrent Shopee API calls per request — fast enough for Hobby's 10s limit
+const BATCH_SIZE = 5
+
+export async function POST() {
+  try {
+    const jar = await cookies()
+    let accessToken = jar.get('shopee_access_token')?.value
+    const shopIdStr = jar.get('shopee_shop_id')?.value
+    const shopId = shopIdStr ? parseInt(shopIdStr) : 0
+    const refreshToken = jar.get('shopee_refresh_token')?.value
+
+    if (!accessToken || !shopId) {
+      return NextResponse.json(
+        { error: 'Not connected to Shopee. Please connect in Settings.' },
+        { status: 401 }
+      )
+    }
+
+    let refreshedAccessToken: string | null = null
+    let refreshedRefreshToken: string | null = null
+
+    if (refreshToken) {
+      try {
+        const newTokens = await refreshAccessToken(refreshToken, shopId)
+        accessToken = newTokens.access_token
+        refreshedAccessToken = newTokens.access_token
+        refreshedRefreshToken = newTokens.refresh_token
+      } catch {
+        // non-fatal: continue with existing token
+      }
+    }
+
+    // ── Fetch a batch of orders that still need escrow data ───────────────────
+    const { data: orders, error: queryError } = await supabase
+      .from('orders')
+      .select('id, order_id, revenue, cogs')
+      .eq('platform', 'Shopee')
+      .in('status', ESCROW_ELIGIBLE_STATUSES)
+      .or('escrow_synced.eq.false,escrow_synced.is.null')
+      .limit(BATCH_SIZE)
+
+    if (queryError) {
+      return NextResponse.json({ error: `DB query failed: ${queryError.message}` }, { status: 500 })
+    }
+
+    if (!orders || orders.length === 0) {
+      const res = NextResponse.json({ synced: 0, remaining: 0, done: true })
+      persistTokensIfRefreshed(res, refreshedAccessToken, refreshedRefreshToken)
+      return res
+    }
+
+    // ── Fetch escrow for the batch concurrently ───────────────────────────────
+    const escrowResults = await Promise.all(
+      orders.map(async (order) => {
+        try {
+          const escrow = await getEscrowDetail(order.order_id, accessToken!, shopId)
+          return { order, escrow, fetchError: null }
+        } catch (err) {
+          return { order, escrow: null, fetchError: err instanceof Error ? err.message : 'Unknown error' }
+        }
+      })
+    )
+
+    // ── Update DB for each order concurrently ─────────────────────────────────
+    const updateFlags = await Promise.all(
+      escrowResults.map(async ({ order, escrow, fetchError }) => {
+        if (fetchError || !escrow) {
+          return false
+        }
+
+        const inc = escrow.order_income ?? {}
+        const commission_fee_actual  = Number(inc.commission_fee ?? 0)
+        const service_fee_actual     = Number(inc.service_fee ?? 0)
+        const ams_commission         = Number(inc.order_ams_commission_fee ?? 0)
+        const processing_fee         = Number(inc.seller_order_processing_fee ?? 0)
+        const shopee_shipping_rebate = Number(inc.shopee_shipping_rebate ?? 0)
+        const voucher_from_seller    = Number(inc.voucher_from_seller ?? 0)
+        const voucher_from_shopee    = Number(inc.voucher_from_shopee ?? 0)
+        const escrow_amount          = Number(inc.escrow_amount ?? 0)
+        const buyer_paid_amount      = Number(inc.buyer_paid_amount ?? 0)
+        const voucher_amount         = voucher_from_seller + voucher_from_shopee
+
+        const net_profit =
+          order.revenue
+          - order.cogs
+          - commission_fee_actual
+          - service_fee_actual
+          - ams_commission
+          - processing_fee
+          - voucher_from_seller
+
+        const { error: updateError } = await supabase
+          .from('orders')
+          .update({
+            buyer_paid_amount,
+            voucher_amount,
+            escrow_amount,
+            commission_fee_actual,
+            service_fee_actual,
+            ams_commission,
+            processing_fee,
+            shopee_shipping_rebate,
+            voucher_from_seller,
+            voucher_from_shopee,
+            net_profit,
+            escrow_synced: true,
+            escrow_synced_at: new Date().toISOString(),
+          })
+          .eq('order_id', order.order_id)
+
+        if (updateError) {
+          return false
+        }
+        return true
+      })
+    )
+
+    const synced = updateFlags.filter(Boolean).length
+
+    // Count how many eligible orders still need escrow
+    const { count: remaining } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('platform', 'Shopee')
+      .in('status', ESCROW_ELIGIBLE_STATUSES)
+      .or('escrow_synced.eq.false,escrow_synced.is.null')
+
+    const done = (remaining ?? 0) === 0
+
+    const res = NextResponse.json({ synced, remaining: remaining ?? 0, done })
+    persistTokensIfRefreshed(res, refreshedAccessToken, refreshedRefreshToken)
+    return res
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
+
+function persistTokensIfRefreshed(
+  res: NextResponse,
+  accessToken: string | null,
+  refreshToken: string | null
+) {
+  if (accessToken) res.cookies.set('shopee_access_token', accessToken, COOKIE_OPTS)
+  if (refreshToken) res.cookies.set('shopee_refresh_token', refreshToken, COOKIE_OPTS)
+}

@@ -8,6 +8,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
+const HAS_SUPABASE_SERVICE_ROLE = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY)
+
 // ── Commission fee estimation ─────────────────────────────────────────────────
 // Shopee escrow API sometimes returns commission_fee = 0 before settlement.
 // Set USE_ESTIMATED_COMMISSION = true to use a flat-rate estimate instead.
@@ -27,7 +29,15 @@ const COOKIE_OPTS = {
   maxAge: 60 * 60 * 24 * 30, // 30 days
 }
 
+function safeIsoFromUnixSeconds(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null
+  const date = new Date(value * 1000)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
+
 export async function POST(request: Request) {
+  const syncStart = Date.now()
+  let stage = 'init'
   try {
     const jar = await cookies()
     let accessToken = jar.get('shopee_access_token')?.value
@@ -41,8 +51,6 @@ export async function POST(request: Request) {
         { status: 401 }
       )
     }
-    const token = accessToken
-
     // ── Step 0: Auto-refresh access token before sync ────────────────────────
     // Shopee tokens expire in ~4 hours. Silently refresh before every sync so
     // we never hit HTTP 401/410 mid-sync due to an expired token.
@@ -51,6 +59,7 @@ export async function POST(request: Request) {
 
     if (refreshToken) {
       try {
+        stage = 'refreshAccessToken'
         const newTokens = await refreshAccessToken(refreshToken, shopId)
         accessToken = newTokens.access_token
         refreshedAccessToken = newTokens.access_token
@@ -64,6 +73,10 @@ export async function POST(request: Request) {
       }
     }
 
+    // Always use the latest token value for downstream Shopee API calls.
+    // Declared as let so the reactive-refresh block below can update it too.
+    let currentToken = accessToken
+
     // Parse ?days= query param (default 90, max 90)
     const { searchParams } = new URL(request.url)
     const days = Math.min(Math.max(parseInt(searchParams.get('days') ?? '90'), 1), 90)
@@ -75,10 +88,53 @@ export async function POST(request: Request) {
     const chunks = chunkDateRange(fromTs, nowTs)
 
     // ── Step 1: Fetch order SNs across all time chunks ───────────────────────
+    // On 403/401, attempt one reactive refresh then retry. This covers the case
+    // where the proactive refresh above silently failed (e.g. Shopee rate-limited
+    // the refresh endpoint) but the access token is also expired.
+    stage = 'getOrderList'
     const seenSns = new Set<string>()
-    for (const chunk of chunks) {
-      const summaries = await getOrderList(token, shopId, chunk.start, chunk.end)
-      for (const o of summaries) seenSns.add(o.order_sn)
+    const fetchChunks = async (tkn: string) => {
+      for (const chunk of chunks) {
+        const summaries = await getOrderList(tkn, shopId, chunk.start, chunk.end)
+        for (const o of summaries) seenSns.add(o.order_sn)
+      }
+    }
+    try {
+      await fetchChunks(currentToken)
+    } catch (err) {
+      if (!isTokenExpiredError(err)) throw err
+      // Token expired mid-sync — reactive refresh
+      const latestRefreshToken = refreshedRefreshToken ?? refreshToken
+      if (!latestRefreshToken) {
+        return NextResponse.json(
+          { error: 'Shopee token expired and no refresh token available. Please reconnect in Settings.', stage: 'getOrderList' },
+          { status: 401 }
+        )
+      }
+      stage = 'reactiveTokenRefresh'
+      try {
+        const newTokens = await refreshAccessToken(latestRefreshToken, shopId)
+        // Update all token references so steps 2+ use the fresh token
+        accessToken = newTokens.access_token
+        currentToken = newTokens.access_token
+        refreshedAccessToken = newTokens.access_token
+        refreshedRefreshToken = newTokens.refresh_token
+      } catch {
+        return NextResponse.json(
+          { error: 'Shopee access token expired. Please reconnect Shopee in Settings.', stage: 'tokenRefresh' },
+          { status: 401 }
+        )
+      }
+      // Retry once with fresh token
+      stage = 'getOrderList'
+      try {
+        await fetchChunks(currentToken)
+      } catch {
+        return NextResponse.json(
+          { error: 'Shopee access token expired. Please reconnect Shopee in Settings.', stage: 'getOrderList' },
+          { status: 401 }
+        )
+      }
     }
 
     if (seenSns.size === 0) {
@@ -90,34 +146,42 @@ export async function POST(request: Request) {
     const orderSnList = Array.from(seenSns)
 
     // ── Step 2: Fetch order details in batches of 50 (Shopee limit) ──────────
+    stage = 'getOrderDetail'
     const BATCH_SIZE = 50
     const details: ShopeeOrderDetail[] = []
     for (let i = 0; i < orderSnList.length; i += BATCH_SIZE) {
       const batch = orderSnList.slice(i, i + BATCH_SIZE)
-      const batchDetails = await getOrderDetail(batch, token, shopId)
+      const batchDetails = await getOrderDetail(batch, currentToken, shopId)
       details.push(...batchDetails)
     }
 
     // ── Step 2b: Fetch escrow details (fees, buyer paid amount) ───────────────
-    // Escrow API is per-order. Use a small concurrency limit to avoid rate limits.
+    // Escrow API is per-order. Budget: ~8s for escrow before we must return.
+    // If deadline is too close, skip escrow — orders still upsert with estimated fees.
+    stage = 'getEscrowDetail'
     const escrowBySn = new Map<string, Awaited<ReturnType<typeof getEscrowDetail>> | null>()
-    const CONCURRENCY = 5
-    let idx = 0
-    async function worker() {
-      for (;;) {
-        const i = idx++
-        if (i >= details.length) return
-        const sn = details[i]?.order_sn
-        if (!sn) continue
-        try {
-          const esc = await getEscrowDetail(String(sn), token, shopId)
-          escrowBySn.set(sn, esc)
-        } catch {
-          escrowBySn.set(sn, null)
+    const ESCROW_DEADLINE_MS = 50_000 // bail out at 50s, well before the 60s maxDuration
+    const escrowSkipped = Date.now() - syncStart > ESCROW_DEADLINE_MS
+    if (!escrowSkipped) {
+      const CONCURRENCY = 10 // bumped from 5; Shopee rate-limits per shop, not per IP
+      let idx = 0
+      async function worker() {
+        for (;;) {
+          const i = idx++
+          if (i >= details.length) return
+          if (Date.now() - syncStart > ESCROW_DEADLINE_MS) return // deadline mid-loop
+          const sn = details[i]?.order_sn
+          if (!sn) continue
+          try {
+            const esc = await getEscrowDetail(String(sn), currentToken, shopId)
+            escrowBySn.set(sn, esc)
+          } catch {
+            escrowBySn.set(sn, null)
+          }
         }
       }
+      await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()))
     }
-    await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()))
 
     // ── Step 3: Map to DB rows ────────────────────────────────────────────────
     const rows = details.map((order) => {
@@ -161,7 +225,8 @@ export async function POST(request: Request) {
       const resolved_commission = resolveCommissionFee(commission_fee || (order.commission_fee ?? 0), revenue)
       const platform_fee = resolved_commission + (service_fee || 0)
       const net_profit = revenue - cogs - shipping_fee - platform_fee
-      const payTime = order.pay_time && order.pay_time > 0 ? order.pay_time : null
+      const createdAt = safeIsoFromUnixSeconds(order.create_time)
+      const paidAt = safeIsoFromUnixSeconds(order.pay_time)
       return {
         platform: 'Shopee' as const,
         order_id: order.order_sn,
@@ -177,14 +242,15 @@ export async function POST(request: Request) {
         escrow_amount,
         net_profit,
         status: order.order_status?.toLowerCase() ?? 'unknown',
-        created_at: new Date(order.create_time * 1000).toISOString(),
+        ...(createdAt ? { created_at: createdAt } : {}),
         // paid_at is the key field used by the dashboard to bucket orders into
         // the correct "paid day" — matching Shopee Seller Center's logic.
-        paid_at: payTime ? new Date(payTime * 1000).toISOString() : null,
+        ...(paidAt ? { paid_at: paidAt } : {}),
       }
     })
 
     // ── Step 4: Upsert into Supabase ──────────────────────────────────────────
+    stage = 'supabaseUpsert'
     const { error } = await supabase.from('orders').upsert(rows, { onConflict: 'order_id' })
     if (error) throw new Error(`Supabase upsert failed: ${error.message}`)
 
@@ -193,13 +259,35 @@ export async function POST(request: Request) {
       chunks: chunks.length,
       days,
       commission_mode: USE_ESTIMATED_COMMISSION ? 'estimated_3pct' : 'api_value',
+      escrow_skipped: escrowSkipped,
     })
     persistTokensIfRefreshed(resPayload, refreshedAccessToken, refreshedRefreshToken)
     return resPayload
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 500 })
+    const needsServiceRoleHint =
+      stage === 'supabaseUpsert' && !HAS_SUPABASE_SERVICE_ROLE
+        ? ' Missing SUPABASE_SERVICE_ROLE_KEY in .env.local; this route is currently falling back to the public anon key.'
+        : ''
+
+    return NextResponse.json(
+      {
+        error: message,
+        stage,
+        debug: {
+          has_supabase_service_role_key: HAS_SUPABASE_SERVICE_ROLE,
+          has_refresh_token_cookie: Boolean((await cookies()).get('shopee_refresh_token')?.value),
+        },
+        hint: `Sync failed during ${stage}.${needsServiceRoleHint}`,
+      },
+      { status: 500 }
+    )
   }
+}
+
+/** Returns true if the error is a Shopee 401/403 (expired or invalid access token). */
+function isTokenExpiredError(err: unknown): boolean {
+  return err instanceof Error && /HTTP 40[13]/.test(err.message)
 }
 
 /** Attach refreshed Shopee cookies to the response so the browser stays logged in. */

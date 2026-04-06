@@ -40,8 +40,14 @@ const NO_MANUAL_EXPENSES: Expense[] = []
 const PLATFORMS = ['All', 'Shopee'] as const
 type PlatformFilter = (typeof PLATFORMS)[number]
 
+function safeDate(raw: string | null | undefined) {
+  if (!raw) return null
+  const value = new Date(raw)
+  return Number.isNaN(value.getTime()) ? null : value
+}
+
 function reportTimeMs(o: Order): number {
-  return new Date(o.paid_at || o.created_at).getTime()
+  return safeDate(o.paid_at || o.created_at)?.getTime() ?? 0
 }
 
 const CHART_METRICS = ['GMV', 'Revenue', 'Orders'] as const
@@ -49,7 +55,11 @@ type ChartMetric = (typeof CHART_METRICS)[number]
 
 const PIE_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6']
 
-type SyncStatus = { state: 'idle' } | { state: 'loading' } | { state: 'success'; count: number } | { state: 'error'; message: string }
+type SyncStatus =
+  | { state: 'idle' }
+  | { state: 'loading'; msg: string }
+  | { state: 'success'; orderCount: number; escrowCount: number }
+  | { state: 'error'; message: string }
 type EscrowSyncStatus = { state: 'idle' } | { state: 'loading' } | { state: 'success'; count: number } | { state: 'error'; message: string }
 
 export default function DashboardPage() {
@@ -89,20 +99,59 @@ export default function DashboardPage() {
   }, [])
 
   async function handleShopeeSync() {
-    setSyncStatus({ state: 'loading' })
+    setSyncStatus({ state: 'loading', msg: 'Fetching orders…' })
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 58_000)
     try {
-      // Sync enough history so "paid order" reporting won't miss orders
-      // that were created earlier than the current window.
-      const res = await fetch('/api/shopee/sync?days=90', { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? 'Sync failed')
-      setSyncStatus({ state: 'success', count: data.synced })
-      const ord = await fetch('/api/orders?days=90').then((r) => r.json())
-      setLiveOrders(Array.isArray(ord) ? ord : [])
+      // ── Step 1: Sync order list + details (no escrow) ──────────────────────
+      const ordersRes = await fetch('/api/shopee/sync/orders?days=90', { method: 'POST', signal: controller.signal })
+      const ordersData = await ordersRes.json().catch(() => ({ error: `Server error (HTTP ${ordersRes.status})` }))
+      if (!ordersRes.ok) throw new Error(ordersData.error ?? 'Order sync failed')
+
+      const orderCount: number = ordersData.synced ?? 0
+      setSyncStatus({ state: 'loading', msg: `Fetched ${orderCount} orders — syncing escrow…` })
+
+      // Refresh so new orders appear while escrow is still loading
+      fetch('/api/orders?days=90').then((r) => r.json()).then((data) => {
+        if (Array.isArray(data)) setLiveOrders(data)
+      }).catch(() => {})
+
+      // ── Step 2: Loop escrow batches (5 concurrent per call) until done ─────
+      let escrowSynced = 0
+      let iteration = 0
+      while (true) {
+        const escrowRes = await fetch('/api/shopee/sync/escrow', { method: 'POST', signal: controller.signal })
+        const escrowData = await escrowRes.json().catch(() => ({ done: true, synced: 0, remaining: 0 }))
+        if (!escrowRes.ok) break // non-fatal: escrow failure shouldn't block showing orders
+
+        escrowSynced += escrowData.synced ?? 0
+        iteration++
+        setSyncStatus({ state: 'loading', msg: `Escrow: ${escrowSynced} synced, ${escrowData.remaining ?? 0} remaining…` })
+
+        // Refresh every 5 batches so dashboard stats update live
+        if (iteration % 5 === 0) {
+          fetch('/api/orders?days=90').then((r) => r.json()).then((data) => {
+            if (Array.isArray(data)) setLiveOrders(data)
+          }).catch(() => {})
+        }
+
+        if (escrowData.done) break
+      }
+
+      clearTimeout(timeout)
+      setSyncStatus({ state: 'success', orderCount, escrowCount: escrowSynced })
+
+      // Final refresh with fully-synced data
+      const ordFinal = await fetch('/api/orders?days=90').then((r) => r.json())
+      setLiveOrders(Array.isArray(ordFinal) ? ordFinal : [])
     } catch (err) {
-      setSyncStatus({ state: 'error', message: err instanceof Error ? err.message : 'Sync failed' })
+      clearTimeout(timeout)
+      const message = err instanceof Error
+        ? (err.name === 'AbortError' ? 'Sync timed out — try again' : err.message)
+        : 'Sync failed'
+      setSyncStatus({ state: 'error', message })
     } finally {
-      setTimeout(() => setSyncStatus({ state: 'idle' }), 4000)
+      setTimeout(() => setSyncStatus({ state: 'idle' }), 5_000)
     }
   }
 
@@ -290,9 +339,14 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
+          {syncStatus.state === 'loading' && (
+            <span className="text-sm text-orange-600 font-medium">
+              {syncStatus.msg}
+            </span>
+          )}
           {syncStatus.state === 'success' && (
             <span className="text-sm text-emerald-600 font-medium">
-              ✓ Synced {syncStatus.count} orders
+              ✓ {syncStatus.orderCount} orders, {syncStatus.escrowCount} escrow synced
             </span>
           )}
           {syncStatus.state === 'error' && (
@@ -319,7 +373,7 @@ export default function DashboardPage() {
               className="border-orange-200 text-orange-600 hover:bg-orange-50 hover:text-orange-700"
             >
               <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${syncStatus.state === 'loading' ? 'animate-spin' : ''}`} />
-              {syncStatus.state === 'loading' ? 'Syncing…' : 'Sync Shopee'}
+              {syncStatus.state === 'loading' ? 'Syncing…' : 'Sync Shopee (Orders + Escrow)'}
             </Button>
           )}
           {shopeeConnected === true && (
@@ -599,7 +653,10 @@ export default function DashboardPage() {
                         {formatCurrency(netProfit)}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">
-                        {format(new Date(order.paid_at || order.created_at), 'MMM d, yyyy')}
+                        {(() => {
+                          const value = safeDate(order.paid_at || order.created_at)
+                          return value ? format(value, 'MMM d, yyyy') : '—'
+                        })()}
                       </td>
                       <td className="px-4 py-3">
                         <Badge

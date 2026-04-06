@@ -61,7 +61,9 @@ function statusLabel(status: string) {
 
 function formatDate(iso: string | null) {
   if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('id-ID', {
+  const value = new Date(iso)
+  if (Number.isNaN(value.getTime())) return '—'
+  return value.toLocaleDateString('id-ID', {
     day: '2-digit', month: 'short', year: 'numeric',
   })
 }
