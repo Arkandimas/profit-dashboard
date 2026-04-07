@@ -101,7 +101,7 @@ export default function DashboardPage() {
   async function handleShopeeSync() {
     setSyncStatus({ state: 'loading', msg: 'Listing orders…' })
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 90_000)
+    const timeout = setTimeout(() => controller.abort(), 300_000) // 5 min — details loop needs time for large stores
     try {
       // ── Step 1: Fetch order list (fast — no details, finishes in < 5s) ──────
       // Uses 7-day window by default: 1 Shopee API chunk, well under 10s limit.
