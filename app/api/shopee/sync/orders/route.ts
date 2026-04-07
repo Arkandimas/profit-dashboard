@@ -107,11 +107,13 @@ export async function POST(request: Request) {
     const runSync = async (tkn: string) => {
       synced = 0
 
-      // Collect all order summaries across date chunks (COMPLETED only).
-      // getOrderList is fast — no optional fields, just order_sn + status + timestamps.
+      // Collect all order summaries across date chunks.
+      // No status filter — syncs all paid orders (READY_TO_SHIP, SHIPPED, COMPLETED)
+      // so our counts match Shopee Seller Center "Pesanan Dibayar".
+      // UNPAID/CANCELLED/RETURNED are excluded later by the details route.
       const allSummaries: ShopeeOrderSummary[] = []
       for (const chunk of chunks) {
-        const summaries = await getOrderList(tkn, shopId, chunk.start, chunk.end, 'COMPLETED')
+        const summaries = await getOrderList(tkn, shopId, chunk.start, chunk.end)
         allSummaries.push(...summaries)
       }
 
