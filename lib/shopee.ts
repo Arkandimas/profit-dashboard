@@ -247,7 +247,7 @@ export async function getOrderList(
       time_from: fromTs,
       time_to: toTs,
       page_size: 100,
-      response_optional_fields: 'order_status,pay_time,item_list',
+      response_optional_fields: 'order_status,item_list',
     }
     if (cursor) params.cursor = cursor
     if (orderStatus) params.order_status = orderStatus
