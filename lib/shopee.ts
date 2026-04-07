@@ -367,7 +367,7 @@ export async function getOrderDetail(
     {
       order_sn_list: orderSnList.join(','),
       response_optional_fields:
-        'buyer_user_id,item_list,actual_shipping_fee,estimated_shipping_fee,commission_fee,total_amount,buyer_total_amount,pay_time,voucher_from_seller,voucher_from_shopee',
+        'pay_time,item_list,total_amount,buyer_total_amount,buyer_username,estimated_shipping_fee,actual_shipping_fee,payment_method,buyer_user_id,voucher_from_seller,voucher_from_shopee',
     },
     accessToken,
     shopId

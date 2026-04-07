@@ -34,6 +34,7 @@ export async function GET(request: Request) {
     // Pre-filter out statuses that can never count as revenue (reduces payload).
     .not('status', 'in', `(${EXCLUDED_STATUSES.join(',')})`)
     .order('created_at', { ascending: false })
+    .range(0, 9999)
 
   if (platform && platform !== 'All') {
     query = query.eq('platform', platform)
