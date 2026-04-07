@@ -118,7 +118,7 @@ export default function DashboardPage() {
       }
       if (!ordersRes.ok) throw new Error(ordersData.error ?? 'Order sync failed')
 
-      const queued: number = ordersData.queued ?? 0
+      const queued: number = ordersData.synced ?? 0
       setSyncStatus({ state: 'loading', msg: `Orders listed: ${queued} — fetching details…` })
 
       // ── Step 2: Fetch order details in batches until done ──────────────────

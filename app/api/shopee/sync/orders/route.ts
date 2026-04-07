@@ -4,13 +4,13 @@ import { createClient } from '@supabase/supabase-js'
 import {
   chunkDateRange,
   getOrderList,
-  getOrderDetail,
   refreshAccessToken,
-  type ShopeeOrderDetail,
+  type ShopeeOrderSummary,
 } from '@/lib/shopee'
 
-// Pro plan: up to 60s. Hobby plan: capped at 10s regardless.
-export const maxDuration = 60
+// This route only lists orders and upserts stubs — fast, well under 10s.
+// Detail enrichment is handled by /sync/details (called in a loop by the UI).
+export const maxDuration = 30
 
 const supabase = createClient(
   process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,28 +25,12 @@ const COOKIE_OPTS = {
   maxAge: 60 * 60 * 24 * 30,
 }
 
-// Shopee getOrderDetail accepts up to 50 order_sn per call.
-const DETAIL_BATCH = 50
-
 /**
- * Maps a getOrderDetail response to a DB upsert row.
- *
- * Field mapping per official Shopee API docs:
- *   order_sn              → order_id
- *   order_status          → status
- *   create_time           → created_at
- *   pay_time              → paid_at
- *   total_amount          → gmv
- *   buyer_total_amount    → buyer_paid_amount + revenue
- *   voucher_from_seller   → voucher_from_seller
- *   voucher_from_shopee   → voucher_from_shopee
- *   estimated_shipping_fee → shipping_fee
+ * Maps a getOrderList summary to a minimal DB stub row.
+ * revenue=0 signals to /sync/details that this order needs enrichment.
+ * ignoreDuplicates: true on upsert ensures already-enriched orders are not overwritten.
  */
-function mapDetailToRow(order: ShopeeOrderDetail) {
-  const buyerPaid = order.buyer_total_amount ?? 0
-  const voucherSeller = order.voucher_from_seller ?? 0
-  const voucherShopee = order.voucher_from_shopee ?? 0
-
+function mapSummaryToStub(order: ShopeeOrderSummary) {
   return {
     platform: 'Shopee' as const,
     order_id: order.order_sn,
@@ -54,13 +38,10 @@ function mapDetailToRow(order: ShopeeOrderDetail) {
     created_at: order.create_time ? new Date(order.create_time * 1000).toISOString() : undefined,
     paid_at: order.pay_time ? new Date(order.pay_time * 1000).toISOString() : undefined,
     gmv: order.total_amount ?? 0,
-    buyer_paid_amount: buyerPaid,
-    revenue: buyerPaid,
-    voucher_from_seller: voucherSeller,
-    voucher_from_shopee: voucherShopee,
-    voucher_amount: voucherSeller + voucherShopee,
-    shipping_fee: order.estimated_shipping_fee ?? 0,
-    cogs: 0,
+    revenue: 0,
+    buyer_paid_amount: 0,
+    voucher_amount: 0,
+    shipping_fee: 0,
     platform_fee: 0,
     commission_fee: 0,
     service_fee: 0,
@@ -126,26 +107,29 @@ export async function POST(request: Request) {
     const runSync = async (tkn: string) => {
       synced = 0
 
-      // ── Step 1: getOrderList — collect all order_sn (COMPLETED, no optional fields) ──
-      const allOrderSns: string[] = []
+      // Collect all order summaries across date chunks (COMPLETED only).
+      // getOrderList is fast — no optional fields, just order_sn + status + timestamps.
+      const allSummaries: ShopeeOrderSummary[] = []
       for (const chunk of chunks) {
         const summaries = await getOrderList(tkn, shopId, chunk.start, chunk.end, 'COMPLETED')
-        for (const s of summaries) allOrderSns.push(s.order_sn)
+        allSummaries.push(...summaries)
       }
 
-      // ── Step 2: getOrderDetail — batch 50 SNs, upsert full rows ──────────────
-      for (let i = 0; i < allOrderSns.length; i += DETAIL_BATCH) {
-        const batch = allOrderSns.slice(i, i + DETAIL_BATCH)
-        const details = await getOrderDetail(batch, tkn, shopId)
-        if (details.length > 0) {
-          const rows = details.map(mapDetailToRow)
-          const { error } = await supabase
-            .from('orders')
-            .upsert(rows, { onConflict: 'order_id', ignoreDuplicates: false })
-          if (error) throw new Error(`Supabase upsert failed: ${error.message}`)
-          synced += details.length
-        }
+      if (allSummaries.length === 0) return
+
+      // Upsert stubs in batches of 100.
+      // ignoreDuplicates: true — skip existing rows so already-enriched orders
+      // (revenue > 0, escrow_synced = true) are never overwritten back to zero.
+      const STUB_BATCH = 100
+      for (let i = 0; i < allSummaries.length; i += STUB_BATCH) {
+        const rows = allSummaries.slice(i, i + STUB_BATCH).map(mapSummaryToStub)
+        const { error } = await supabase
+          .from('orders')
+          .upsert(rows, { onConflict: 'order_id', ignoreDuplicates: true })
+        if (error) throw new Error(`Supabase stub upsert failed: ${error.message}`)
       }
+
+      synced = allSummaries.length
     }
 
     try {
