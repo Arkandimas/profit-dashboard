@@ -104,7 +104,7 @@ export async function GET(request: Request) {
       item_list_sum: computed.item_revenue_sum,
       total_amount: computed.total_amount,
       revenue_matches_item_list: Math.abs(dbRow.revenue - computed.item_revenue_sum) < 1,
-      revenue_matches_total_amount: Math.abs(dbRow.revenue - computed.total_amount) < 1,
+      revenue_matches_total_amount: computed.total_amount != null ? Math.abs(dbRow.revenue - computed.total_amount) < 1 : null,
       paid_at_in_db: dbRow.paid_at,
       paid_at_from_api_wib: computed.pay_time_wib,
     } : null,

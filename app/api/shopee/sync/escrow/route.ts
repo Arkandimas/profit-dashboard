@@ -19,8 +19,8 @@ const COOKIE_OPTS = {
   maxAge: 60 * 60 * 24 * 30,
 }
 
-// Only orders with settled payment have escrow data available
-const ESCROW_ELIGIBLE_STATUSES = ['completed', 'to_confirm_receive']
+// Uppercase: matches how Shopee returns status (COMPLETED, TO_CONFIRM_RECEIVE)
+const ESCROW_ELIGIBLE_STATUSES = ['COMPLETED', 'TO_CONFIRM_RECEIVE']
 
 // 5 concurrent Shopee API calls per request — fast enough for Hobby's 10s limit
 const BATCH_SIZE = 5

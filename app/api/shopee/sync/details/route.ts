@@ -2,10 +2,9 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
 import {
-  chunkDateRange,
-  getOrderList,
+  getOrderDetail,
   refreshAccessToken,
-  type ShopeeOrderSummary,
+  type ShopeeOrderDetail,
 } from '@/lib/shopee'
 
 // Pro plan: up to 60s. Hobby plan: capped at 10s regardless.
@@ -24,7 +23,10 @@ const COOKIE_OPTS = {
   maxAge: 60 * 60 * 24 * 30,
 }
 
-// Uppercase: Shopee returns status in uppercase (COMPLETED, CANCELLED, etc.)
+// Orders processed per call. 10 order_sn per getOrderDetail call × N calls.
+const BATCH_SIZE = 50
+
+// Uppercase: matches how we store status from Shopee API
 const EXCLUDED_STATUSES = ['UNPAID', 'CANCELLED', 'CANCELED', 'RETURNED', 'REFUNDED']
 
 function safeIsoFromUnixSeconds(value: number | null | undefined): string | null {
@@ -34,29 +36,42 @@ function safeIsoFromUnixSeconds(value: number | null | undefined): string | null
 }
 
 /**
- * Maps a getOrderList summary row to a DB row.
- * Stores Shopee fields EXACTLY as returned — no derivation.
- * revenue stays 0 here (getOrderList does not return buyer_total_amount).
- * The /api/shopee/sync/details route overwrites revenue with buyer_total_amount.
+ * Maps a getOrderDetail response to a DB upsert row.
+ * Stores Shopee fields EXACTLY as returned — no derivation or estimation.
+ *
+ * Field mapping:
+ *   total_amount          → gmv           (item total before buyer vouchers)
+ *   buyer_total_amount    → buyer_paid_amount + revenue  (what buyer actually paid)
+ *   voucher_from_seller   → voucher_from_seller
+ *   voucher_from_shopee   → voucher_from_shopee
+ *   estimated_shipping_fee ?? actual_shipping_fee → shipping_fee
+ *   pay_time              → paid_at
+ *   order_status          → status (raw UPPERCASE)
  */
-function mapSummaryToRow(order: ShopeeOrderSummary) {
-  const createdAt = safeIsoFromUnixSeconds(order.create_time)
+function mapDetailToRow(order: ShopeeOrderDetail) {
+  const gmv = order.total_amount ?? 0
+  const buyerPaid = order.buyer_total_amount ?? 0
+  const shippingFee = order.estimated_shipping_fee ?? order.actual_shipping_fee ?? 0
+  const voucherSeller = order.voucher_from_seller ?? 0
+  const voucherShopee = order.voucher_from_shopee ?? 0
   const paidAt = safeIsoFromUnixSeconds(order.pay_time)
+  const createdAt = safeIsoFromUnixSeconds(order.create_time)
 
   return {
     platform: 'Shopee' as const,
     order_id: order.order_sn,
-    // Store raw total_amount as gmv. 0 if not returned (Shopee uses full Rupiah, not cents).
-    gmv: order.total_amount ?? 0,
-    revenue: 0,        // will be set to buyer_total_amount by details route
-    buyer_paid_amount: 0,
-    cogs: 0,
-    shipping_fee: 0,
+    gmv,
+    // revenue = buyer_paid_amount: what buyer actually paid after all discounts
+    revenue: buyerPaid,
+    buyer_paid_amount: buyerPaid,
+    voucher_from_seller: voucherSeller,
+    voucher_from_shopee: voucherShopee,
+    voucher_amount: voucherSeller + voucherShopee,
+    shipping_fee: shippingFee,
+    // platform_fee/commission_fee/service_fee stay 0 until escrow sync provides actuals
     platform_fee: 0,
     commission_fee: 0,
     service_fee: 0,
-    net_profit: 0,
-    // Raw Shopee status — UPPERCASE (READY_TO_SHIP, COMPLETED, CANCELLED, etc.)
     status: order.order_status ?? 'UNKNOWN',
     ...(createdAt ? { created_at: createdAt } : {}),
     ...(paidAt ? { paid_at: paidAt } : {}),
@@ -97,10 +112,10 @@ export async function POST(request: Request) {
       )
     }
 
+    // ── Proactive token refresh ───────────────────────────────────────────────
     let refreshedAccessToken: string | null = null
     let refreshedRefreshToken: string | null = null
 
-    // ── Proactive token refresh ───────────────────────────────────────────────
     if (refreshToken) {
       try {
         const newTokens = await refreshAccessToken(refreshToken, shopId)
@@ -108,46 +123,64 @@ export async function POST(request: Request) {
         refreshedAccessToken = newTokens.access_token
         refreshedRefreshToken = newTokens.refresh_token
       } catch {
-        // Non-fatal: continue with current token; reactive block below handles 401/403.
+        // Non-fatal: continue with current token.
       }
     }
 
-    const { searchParams } = new URL(request.url)
-    // Default 7 days (1 chunk = 1 Shopee API call, fast). Max 90 for full resyncs.
-    const days = Math.min(Math.max(parseInt(searchParams.get('days') ?? '7'), 1), 90)
-    const nowTs = Math.floor(Date.now() / 1000)
-    const fromTs = nowTs - days * 86400
-    const chunks = chunkDateRange(fromTs, nowTs)
+    // ── Find orders needing detail enrichment ─────────────────────────────────
+    // Orders from getOrderList have revenue=0 (buyer_total_amount not available there).
+    // revenue=0 is the "needs details" proxy.
+    const fromDate = new Date()
+    fromDate.setDate(fromDate.getDate() - 30)
+    const fromIso = fromDate.toISOString()
 
-    // ── Collect order summaries and persist ───────────────────────────────────
-    const summariesBySn = new Map<string, ShopeeOrderSummary>()
+    const { data: pendingOrders, error: queryError } = await supabase
+      .from('orders')
+      .select('order_id')
+      .eq('platform', 'Shopee')
+      .eq('revenue', 0)
+      .not('status', 'in', `(${EXCLUDED_STATUSES.join(',')})`)
+      .gte('created_at', fromIso)
+      .order('created_at', { ascending: false })
+      .limit(BATCH_SIZE)
 
-    const runStep = async (tkn: string) => {
-      summariesBySn.clear()
-      for (const chunk of chunks) {
-        const summaries = await getOrderList(tkn, shopId, chunk.start, chunk.end)
-        for (const summary of summaries) summariesBySn.set(summary.order_sn, summary)
+    if (queryError) {
+      return NextResponse.json({ error: queryError.message }, { status: 500 })
+    }
 
-        if (summaries.length > 0) {
-          const rows = summaries
-            .filter((s) => !EXCLUDED_STATUSES.includes(s.order_status?.toUpperCase() ?? ''))
-            .map(mapSummaryToRow)
-          if (rows.length > 0) {
-            const { error } = await supabase
-              .from('orders')
-              .upsert(rows, { onConflict: 'order_id', ignoreDuplicates: false })
-            if (error) throw new Error(`Supabase upsert failed: ${error.message}`)
-          }
+    const orderSns = (pendingOrders ?? []).map((r) => r.order_id as string)
+
+    if (orderSns.length === 0) {
+      const res = NextResponse.json({ success: true, updated: 0, remaining: 0, done: true })
+      persistTokensIfRefreshed(res, refreshedAccessToken, refreshedRefreshToken)
+      return res
+    }
+
+    // ── Fetch details in sub-batches of 10 (Shopee API limit) ─────────────────
+    const SHOPEE_BATCH = 10
+    let updatedCount = 0
+
+    const fetchAndUpsert = async (tkn: string) => {
+      updatedCount = 0
+      for (let i = 0; i < orderSns.length; i += SHOPEE_BATCH) {
+        const batch = orderSns.slice(i, i + SHOPEE_BATCH)
+        const details = await getOrderDetail(batch, tkn, shopId)
+        if (details.length > 0) {
+          const rows = details.map(mapDetailToRow)
+          const { error } = await supabase
+            .from('orders')
+            .upsert(rows, { onConflict: 'order_id', ignoreDuplicates: false })
+          if (error) throw new Error(`Supabase detail upsert failed: ${error.message}`)
+          updatedCount += details.length
         }
       }
     }
 
     try {
-      await runStep(accessToken)
+      await fetchAndUpsert(accessToken)
     } catch (err) {
       if (!isTokenExpiredError(err)) throw err
 
-      // ── Reactive refresh: token expired mid-sync ──────────────────────────
       const latestRefreshToken = refreshedRefreshToken ?? refreshToken
       if (!latestRefreshToken) {
         return NextResponse.json(
@@ -171,7 +204,7 @@ export async function POST(request: Request) {
       refreshedRefreshToken = freshTokens.refresh_token
 
       try {
-        await runStep(accessToken)
+        await fetchAndUpsert(accessToken)
       } catch {
         return NextResponse.json(
           { error: 'Shopee session expired. Please reconnect in Settings.', reconnect_required: true },
@@ -180,10 +213,20 @@ export async function POST(request: Request) {
       }
     }
 
+    // ── Check how many still need details ─────────────────────────────────────
+    const { count: remaining } = await supabase
+      .from('orders')
+      .select('order_id', { count: 'exact', head: true })
+      .eq('platform', 'Shopee')
+      .eq('revenue', 0)
+      .not('status', 'in', `(${EXCLUDED_STATUSES.join(',')})`)
+      .gte('created_at', fromIso)
+
     const res = NextResponse.json({
       success: true,
-      queued: summariesBySn.size,
-      days,
+      updated: updatedCount,
+      remaining: remaining ?? 0,
+      done: (remaining ?? 0) === 0,
     })
     persistTokensIfRefreshed(res, refreshedAccessToken, refreshedRefreshToken)
     return res

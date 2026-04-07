@@ -7,13 +7,15 @@
   "executionArgs": {
     "projectName": "profit-dashboard",
     "projectPath": "/Users/arkandimaspratama/profit-dashboard",
-    "testIds": [],
-    "additionalInstruction": "",
-    "serverMode": "development",
+    "testIds": [
+      "TC002"
+    ],
+    "additionalInstruction": "DO NOT regenerate test files. TC002 expects HTTP 200 because the API clamps days to the allowed maximum (100) and returns results — it does NOT return 500. Use the existing test file as-is.",
+    "serverMode": "production",
     "envs": {
       "API_KEY": "sk-user-MxcMlvlH2HrXpySY6ZOvRcBK1w4uKQ_2Jy2tYhsJMdXmKMdHOH0JEVja2X8cql2AXWbxaD7t4AqQjBmMAEVXjhJk3Mxs9zPB328qXKXrmYX5uS2u1NYjdR2N_SeJ1b7HlV0"
     }
   },
-  "serverPort": 56736,
-  "proxy": "http://6d726e10-a9db-486b-8709-c366c2da3cd2:fKHmEX9Y8W2eKdfVXZ5sYPKaD14OkKPX@tun.testsprite.com:8080"
+  "serverPort": 55092,
+  "proxy": "http://aa85d9c3-5c52-49f5-98f7-4b62d926d607:q9dDPsrdkVeI55tcgk89MUOtLeGitPfC@tun.testsprite.com:8080"
 }

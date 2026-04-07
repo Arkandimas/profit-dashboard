@@ -3,6 +3,9 @@ import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
 import { chunkDateRange, getOrderList, getOrderDetail, getEscrowDetail, refreshAccessToken, type ShopeeOrderDetail } from '@/lib/shopee'
 
+// Pro plan: up to 60s. Hobby plan: capped at 10s regardless.
+export const maxDuration = 60
+
 const supabase = createClient(
   process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!

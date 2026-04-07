@@ -8,7 +8,8 @@ const supabase = createClient(
 
 // Shopee statuses that will never contribute to "Pesanan Dibayar" revenue.
 // Filtering these at the DB level reduces the payload size returned to the client.
-const EXCLUDED_STATUSES = ['unpaid', 'cancelled', 'canceled', 'returned', 'refunded']
+// Uppercase: matches how Shopee returns status (CANCELLED, UNPAID, etc.)
+const EXCLUDED_STATUSES = ['UNPAID', 'CANCELLED', 'CANCELED', 'RETURNED', 'REFUNDED']
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -25,7 +26,7 @@ export async function GET(request: Request) {
 
   let query = supabase
     .from('orders')
-    .select('id, platform, order_id, gmv, buyer_paid_amount, voucher_amount, revenue, cogs, shipping_fee, platform_fee, commission_fee, service_fee, escrow_amount, status, created_at, paid_at')
+    .select('id, platform, order_id, gmv, buyer_paid_amount, voucher_amount, revenue, cogs, shipping_fee, platform_fee, commission_fee, service_fee, escrow_amount, status, created_at, paid_at, escrow_synced, commission_fee_actual, service_fee_actual, ams_commission, processing_fee, shopee_shipping_rebate, voucher_from_seller, voucher_from_shopee')
     // Fetch rows whose created_at OR paid_at falls within the window.
     // The precise day-level filtering (Yesterday / Last 7 Days etc.) is done
     // client-side in Asia/Jakarta timezone by filterOrdersByReportDate().

@@ -3,46 +3,34 @@ import requests
 def test_get_orders_with_valid_days_and_platform():
     base_url = "http://localhost:3000"
     endpoint = "/api/orders"
-    params = {
-        "days": 30,
-        "platform": "Shopee"
-    }
-    headers = {
-        "Accept": "application/json"
-    }
+    params = {"days": 30, "platform": "Shopee"}
     timeout = 30
+    headers = {"Accept": "application/json"}
 
     try:
-        response = requests.get(
-            url=f"{base_url}{endpoint}",
-            params=params,
-            headers=headers,
-            timeout=timeout
-        )
+        response = requests.get(f"{base_url}{endpoint}", params=params, headers=headers, timeout=timeout)
     except requests.RequestException as e:
         assert False, f"Request failed: {e}"
 
-    assert response.status_code == 200, f"Expected status 200, got {response.status_code}"
+    assert response.status_code == 200, f"Expected status 200 but got {response.status_code}"
 
     try:
-        orders = response.json()
+        data = response.json()
     except ValueError:
         assert False, "Response is not valid JSON"
 
-    assert isinstance(orders, list), "Response JSON is not a list"
+    assert isinstance(data, list), f"Expected response to be a list but got {type(data)}"
 
-    # Validate each order has expected platform and revenue status (since non-revenue statuses are excluded)
-    # As PRD does not define order schema fields precisely, we check minimal assumptions:
-    # Assuming each order dict has a 'platform' field equal to 'Shopee'
-    for order in orders:
-        assert isinstance(order, dict), "Each order should be a dict"
+    # Validate that all orders returned have platform "Shopee" and exclude non-revenue statuses
+    for order in data:
+        # Each order should be a dict containing at least a platform key, and a status indicating revenue status
+        assert isinstance(order, dict), f"Order is not a dict but {type(order)}"
         platform = order.get("platform")
-        assert platform == "Shopee", f"Order platform expected 'Shopee', got {platform}"
-
-        # Check that order status is revenue generating - 
-        # Since non-revenue statuses excluded by API, presence of 'status' is assumed and should be revenue
-        # But PRD does not specify status values, so we just assert 'status' exists and is truthy
+        assert platform == "Shopee", f"Order platform expected 'Shopee' but got {platform}"
         status = order.get("status")
-        assert status, "Order missing or empty 'status' field"
+        # Based on PRD, non-revenue statuses should be excluded, so status should not be in a known non-revenue list.
+        # We don't have exact list of non-revenue statuses, so ensure status exists and is not null/empty
+        assert status is not None and status != "", "Order status is missing or empty"
 
+# Execute the test function
 test_get_orders_with_valid_days_and_platform()

@@ -2,12 +2,13 @@ import requests
 
 def test_post_shopee_sync_without_authentication_cookies():
     base_url = "http://localhost:3000"
-    url = f"{base_url}/api/shopee/sync"
-    params = {"days": 30}
-    timeout = 30
+    url = f"{base_url}/api/shopee/sync?days=30"
+    headers = {
+        "Content-Type": "application/json",
+    }
 
     try:
-        response = requests.post(url, params=params, timeout=timeout)
+        response = requests.post(url, headers=headers, timeout=30)
     except requests.RequestException as e:
         assert False, f"Request failed: {e}"
 
@@ -15,14 +16,16 @@ def test_post_shopee_sync_without_authentication_cookies():
     try:
         json_resp = response.json()
     except ValueError:
-        json_resp = {}
+        json_resp = None
 
-    # Validate error message content if available
-    if json_resp:
-        expected_error_message = "Not connected to Shopee"
-        # The message might be in different keys; check keys for this message
-        errors = [str(v).lower() for v in json_resp.values() if isinstance(v, str)]
-        assert any(expected_error_message.lower() in err for err in errors), \
-            f"Expected error message containing '{expected_error_message}', got {json_resp}"
+    # The PRD states the response body for 401 is "Not connected to Shopee"
+    if json_resp and isinstance(json_resp, dict):
+        # If JSON response is an error message string or object, verify content
+        msg = json_resp.get('message') or json_resp.get('error') or str(json_resp)
+        assert "Not connected to Shopee" in msg, f"Unexpected error message: {msg}"
+    else:
+        # If response is plain text or missing json, check text content
+        text = response.text or ""
+        assert "Not connected to Shopee" in text, f"Unexpected response text: {text}"
 
 test_post_shopee_sync_without_authentication_cookies()

@@ -59,7 +59,7 @@ type SyncStatus =
   | { state: 'idle' }
   | { state: 'loading'; msg: string }
   | { state: 'success'; orderCount: number; escrowCount: number }
-  | { state: 'error'; message: string }
+  | { state: 'error'; message: string; reconnect_required?: boolean }
 type EscrowSyncStatus = { state: 'idle' } | { state: 'loading' } | { state: 'success'; count: number } | { state: 'error'; message: string }
 
 export default function DashboardPage() {
@@ -99,37 +99,71 @@ export default function DashboardPage() {
   }, [])
 
   async function handleShopeeSync() {
-    setSyncStatus({ state: 'loading', msg: 'Fetching orders…' })
+    setSyncStatus({ state: 'loading', msg: 'Listing orders…' })
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 58_000)
+    const timeout = setTimeout(() => controller.abort(), 90_000)
     try {
-      // ── Step 1: Sync order list + details (no escrow) ──────────────────────
-      const ordersRes = await fetch('/api/shopee/sync/orders?days=90', { method: 'POST', signal: controller.signal })
+      // ── Step 1: Fetch order list (fast — no details, finishes in < 5s) ──────
+      // Uses 7-day window by default: 1 Shopee API chunk, well under 10s limit.
+      const ordersRes = await fetch('/api/shopee/sync/orders?days=7', { method: 'POST', signal: controller.signal })
       const ordersData = await ordersRes.json().catch(() => ({ error: `Server error (HTTP ${ordersRes.status})` }))
+      if (ordersData.reconnect_required) {
+        clearTimeout(timeout)
+        setSyncStatus({
+          state: 'error',
+          message: 'Session expired — please reconnect Shopee in Settings.',
+          reconnect_required: true,
+        })
+        return
+      }
       if (!ordersRes.ok) throw new Error(ordersData.error ?? 'Order sync failed')
 
-      const orderCount: number = ordersData.synced ?? 0
-      setSyncStatus({ state: 'loading', msg: `Fetched ${orderCount} orders — syncing escrow…` })
+      const queued: number = ordersData.queued ?? 0
+      setSyncStatus({ state: 'loading', msg: `Orders listed: ${queued} — fetching details…` })
 
-      // Refresh so new orders appear while escrow is still loading
+      // ── Step 2: Fetch order details in batches until done ──────────────────
+      // Each call processes up to 50 orders, finishes in < 5s on Hobby plan.
+      let detailsSynced = 0
+      let detailsIteration = 0
+      while (true) {
+        const detailsRes = await fetch('/api/shopee/sync/details', { method: 'POST', signal: controller.signal })
+        const detailsData = await detailsRes.json().catch(() => ({ done: true, updated: 0, remaining: 0 }))
+        if (!detailsRes.ok) break // non-fatal
+
+        detailsSynced += detailsData.updated ?? 0
+        detailsIteration++
+        setSyncStatus({ state: 'loading', msg: `Details synced: ${detailsSynced}${detailsData.remaining > 0 ? `, ${detailsData.remaining} remaining…` : ''}` })
+
+        // Refresh DB view every 3 detail batches so dashboard updates live
+        if (detailsIteration % 3 === 0) {
+          fetch('/api/orders?days=90').then((r) => r.json()).then((data) => {
+            if (Array.isArray(data)) setLiveOrders(data)
+          }).catch(() => {})
+        }
+
+        if (detailsData.done) break
+      }
+
+      // Refresh after details are done
       fetch('/api/orders?days=90').then((r) => r.json()).then((data) => {
         if (Array.isArray(data)) setLiveOrders(data)
       }).catch(() => {})
 
-      // ── Step 2: Loop escrow batches (5 concurrent per call) until done ─────
+      setSyncStatus({ state: 'loading', msg: `Details synced: ${detailsSynced} — syncing escrow…` })
+
+      // ── Step 3: Loop escrow batches until done ─────────────────────────────
       let escrowSynced = 0
-      let iteration = 0
+      let escrowIteration = 0
       while (true) {
         const escrowRes = await fetch('/api/shopee/sync/escrow', { method: 'POST', signal: controller.signal })
         const escrowData = await escrowRes.json().catch(() => ({ done: true, synced: 0, remaining: 0 }))
-        if (!escrowRes.ok) break // non-fatal: escrow failure shouldn't block showing orders
+        if (!escrowRes.ok) break
 
         escrowSynced += escrowData.synced ?? 0
-        iteration++
+        escrowIteration++
         setSyncStatus({ state: 'loading', msg: `Escrow: ${escrowSynced} synced, ${escrowData.remaining ?? 0} remaining…` })
 
-        // Refresh every 5 batches so dashboard stats update live
-        if (iteration % 5 === 0) {
+        if (escrowIteration % 5 === 0) {
           fetch('/api/orders?days=90').then((r) => r.json()).then((data) => {
             if (Array.isArray(data)) setLiveOrders(data)
           }).catch(() => {})
@@ -139,7 +173,7 @@ export default function DashboardPage() {
       }
 
       clearTimeout(timeout)
-      setSyncStatus({ state: 'success', orderCount, escrowCount: escrowSynced })
+      setSyncStatus({ state: 'success', orderCount: queued, escrowCount: escrowSynced })
 
       // Final refresh with fully-synced data
       const ordFinal = await fetch('/api/orders?days=90').then((r) => r.json())
@@ -275,7 +309,20 @@ export default function DashboardPage() {
     () => commissionTotal + serviceFeeTotal + amsTotal + processingTotal,
     [commissionTotal, serviceFeeTotal, amsTotal, processingTotal]
   )
-  const netRevenue = useMemo(() => metrics.revenue - platformFees, [metrics.revenue, platformFees])
+
+  // Net Revenue: use sum of escrow_amount when available (most accurate),
+  // fall back to revenue - platformFees for unsynced orders.
+  const escrowAmountTotal = useMemo(
+    () => filteredOrders
+      .filter((o) => orderCountsForShopeeKpi(o.status) && o.escrow_synced)
+      .reduce((s, o) => s + (Number(o.escrow_amount) || 0), 0),
+    [filteredOrders]
+  )
+  const netRevenue = useMemo(() => {
+    if (escrowSyncedCount > 0) return escrowAmountTotal
+    return metrics.revenue - platformFees
+  }, [escrowSyncedCount, escrowAmountTotal, metrics.revenue, platformFees])
+
   const netProfit = useMemo(() => netRevenue - metrics.cogs - metrics.adSpendTotal, [netRevenue, metrics.cogs, metrics.adSpendTotal])
 
   // Waterfall breakdown: GMV → Diskon → Revenue → Komisi → Serv.Fee → AMS → Proc.Fee → COGS → Profit
@@ -350,8 +397,13 @@ export default function DashboardPage() {
             </span>
           )}
           {syncStatus.state === 'error' && (
-            <span className="text-sm text-red-600 font-medium" title={syncStatus.message}>
+            <span className="text-sm text-red-600 font-medium">
               ✕ {syncStatus.message}
+              {syncStatus.reconnect_required && (
+                <a href="/settings" className="ml-1 underline">
+                  Go to Settings
+                </a>
+              )}
             </span>
           )}
           {escrowSyncStatus.state === 'success' && (
@@ -448,9 +500,12 @@ export default function DashboardPage() {
               : 'Estimated from 3% commission rate. Run "Sync Escrow" for real figures.'}
           />
           <KpiCard
-            title="Net Revenue"
+            title={escrowSyncedCount > 0 ? 'Net Revenue (escrow) ✓' : 'Net Revenue (pending escrow)'}
             value={formatCurrency(netRevenue)}
             icon={<TrendingUp className="w-4 h-4" />}
+            tooltip={escrowSyncedCount > 0
+              ? `Based on escrow_amount for ${escrowSyncedCount} verified orders.`
+              : 'Estimated: Revenue minus fees. Run "Sync Escrow" for real escrow figures.'}
           />
           <KpiCard
             title="Net Profit"

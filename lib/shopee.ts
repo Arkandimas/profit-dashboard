@@ -35,6 +35,16 @@ function buildUrl(
   return `${BASE_URL}${path}?${query}`
 }
 
+// ─── Fetch with timeout ───────────────────────────────────────────────────────
+// Every Shopee API call uses this wrapper so that a slow/stalled response from
+// Shopee's servers does not cause our Vercel function to hang until the platform
+// kills it (10 s on Hobby, 60 s on Pro). 8 s leaves headroom for retries/DB.
+function shopFetch(url: string, init: RequestInit = {}, timeoutMs = 8_000): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer))
+}
+
 // ─── OAuth ────────────────────────────────────────────────────────────────────
 
 /** Returns the Shopee authorization URL to redirect sellers to. */
@@ -103,7 +113,7 @@ export async function exchangeToken(code: string, shopId: number): Promise<Token
     sign: signature,
   })
 
-  const res = await fetch(`${BASE_URL}${path}?${query}`, {
+  const res = await shopFetch(`${BASE_URL}${path}?${query}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code, shop_id: shopId, partner_id: PARTNER_ID }),
@@ -130,7 +140,7 @@ export async function refreshAccessToken(
     sign: signature,
   })
 
-  const res = await fetch(`${BASE_URL}${path}?${query}`, {
+  const res = await shopFetch(`${BASE_URL}${path}?${query}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refresh_token: refreshToken, shop_id: shopId, partner_id: PARTNER_ID }),
@@ -150,7 +160,7 @@ export interface ShopInfo {
 /** Fetch basic shop info (name, status) after connecting. */
 export async function getShopInfo(accessToken: string, shopId: number): Promise<ShopInfo> {
   const url = buildUrl('/api/v2/shop/get_shop_info', {}, accessToken, shopId)
-  const res = await fetch(url)
+  const res = await shopFetch(url)
   if (!res.ok) throw new Error(`getShopInfo HTTP ${res.status}`)
   const data = await res.json()
   if (data.error && data.error !== '') throw new Error(`getShopInfo: ${data.message ?? data.error}`)
@@ -167,7 +177,8 @@ export interface ShopeeOrderSummary {
   order_status: string
   create_time: number
   update_time: number
-  total_amount: number
+  pay_time?: number
+  total_amount?: number
 }
 
 export interface ShopeeOrderDetail {
@@ -177,14 +188,15 @@ export interface ShopeeOrderDetail {
   update_time: number
   /** Unix seconds; use for seller-center style “paid order” day bucketing (GMT+7 in UI). */
   pay_time?: number
-  total_amount: number
-  buyer_user_id: number
+  total_amount?: number
+  /** Amount actually paid by buyer (after vouchers/discounts). Maps to buyer_paid_amount. */
+  buyer_total_amount?: number
+  buyer_user_id?: number
   /**
    * Field name in Shopee API v2 response is `item_list` (NOT `items`).
    * Requested via response_optional_fields: 'item_list'.
-   * Contains per-line product pricing used to compute Shopee "Penjualan".
    */
-  item_list: Array<{
+  item_list?: Array<{
     item_id: number
     item_name: string
     item_sku: string
@@ -192,8 +204,11 @@ export interface ShopeeOrderDetail {
     model_original_price: number
     model_discounted_price: number
   }>
-  actual_shipping_fee: number
-  commission_fee: number
+  estimated_shipping_fee?: number
+  actual_shipping_fee?: number
+  commission_fee?: number
+  voucher_from_seller?: number
+  voucher_from_shopee?: number
 }
 
 // Shopee API allows max 15 days per getOrderList request.
@@ -219,7 +234,8 @@ export async function getOrderList(
   accessToken: string,
   shopId: number,
   fromTs: number,
-  toTs: number
+  toTs: number,
+  orderStatus?: string
 ): Promise<ShopeeOrderSummary[]> {
   const path = '/api/v2/order/get_order_list'
   const all: ShopeeOrderSummary[] = []
@@ -231,12 +247,13 @@ export async function getOrderList(
       time_from: fromTs,
       time_to: toTs,
       page_size: 100,
-      response_optional_fields: 'order_status',
+      response_optional_fields: 'order_status,pay_time,item_list',
     }
     if (cursor) params.cursor = cursor
+    if (orderStatus) params.order_status = orderStatus
 
     const url = buildUrl(path, params, accessToken, shopId)
-    const res = await fetch(url)
+    const res = await shopFetch(url)
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
       throw new Error(`getOrderList HTTP ${res.status}: ${body.message || body.error || 'unknown'}`)
@@ -285,7 +302,7 @@ export async function getItemList(
     accessToken,
     shopId
   )
-  const res = await fetch(url)
+  const res = await shopFetch(url)
   if (!res.ok) throw new Error(`getItemList HTTP ${res.status}`)
   const data = await res.json()
   if (data.error && data.error !== '') throw new Error(`getItemList: ${data.message ?? data.error}`)
@@ -309,7 +326,7 @@ export async function getItemBaseInfo(
     accessToken,
     shopId
   )
-  const res = await fetch(url)
+  const res = await shopFetch(url)
   if (!res.ok) throw new Error(`getItemBaseInfo HTTP ${res.status}`)
   const data = await res.json()
   if (data.error && data.error !== '') throw new Error(`getItemBaseInfo: ${data.message ?? data.error}`)
@@ -332,7 +349,7 @@ export async function getItemModelList(
 ): Promise<ShopeeItemModel[]> {
   const path = '/api/v2/product/get_model_list'
   const url = buildUrl(path, { item_id: itemId }, accessToken, shopId)
-  const res = await fetch(url)
+  const res = await shopFetch(url)
   if (!res.ok) throw new Error(`getItemModelList HTTP ${res.status}`)
   const data = await res.json()
   if (data.error && data.error !== '') throw new Error(`getItemModelList: ${data.message ?? data.error}`)
@@ -351,13 +368,13 @@ export async function getOrderDetail(
     {
       order_sn_list: orderSnList.join(','),
       response_optional_fields:
-        'buyer_user_id,item_list,actual_shipping_fee,commission_fee,total_amount,pay_time',
+        'buyer_user_id,item_list,actual_shipping_fee,estimated_shipping_fee,commission_fee,total_amount,buyer_total_amount,pay_time,voucher_from_seller,voucher_from_shopee',
     },
     accessToken,
     shopId
   )
 
-  const res = await fetch(url)
+  const res = await shopFetch(url)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(`getOrderDetail HTTP ${res.status}: ${body.message || body.error || 'unknown'}`)
@@ -415,7 +432,7 @@ export async function getEscrowDetail(
 ): Promise<ShopeeEscrowDetail> {
   const path = '/api/v2/payment/get_escrow_detail'
   const url = buildUrl(path, { order_sn: orderSn }, accessToken, shopId)
-  const res = await fetch(url)
+  const res = await shopFetch(url)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(`getEscrowDetail HTTP ${res.status}: ${body.message || body.error || 'unknown'}`)

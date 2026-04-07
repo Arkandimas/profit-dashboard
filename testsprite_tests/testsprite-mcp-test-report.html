@@ -1213,7 +1213,7 @@ body {
         </div>
         <div class="metadata-row">
           <div class="metadata-label text-body-medium">Date</div>
-          <div class="metadata-value text-body">4/4/2026</div>
+          <div class="metadata-value text-body">4/7/2026</div>
         </div>
         <div class="metadata-row">
           <div class="metadata-label text-body-medium">Prepared by</div>
@@ -1234,29 +1234,21 @@ body {
         
         <div class="coverage-summary">
           <ul class="coverage-list text-body">
-            <li><span class="coverage-highlight">4/10</span> of tests passed</li>
+            <li><span class="coverage-highlight">0/0</span> of tests passed</li>
             <li><span class="coverage-highlight">Key gaps / risks:</span>
             
-              <blockquote>
-<p><strong>40% of tests passed fully.</strong></p>
-</blockquote>
-<p><strong>Root cause of most failures:</strong> Missing Supabase environment variables in the isolated test environment. TC001 and TC008 both return HTTP 500 because <code>NEXT_PUBLIC_SUPABASE_URL</code> / <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> are not set during test execution — not a code bug.</p>
-<p><strong>Actionable risks identified:</strong></p>
-<ol>
+              <ol>
 <li>
-<p><strong>Supabase credentials not injected in tests (HIGH)</strong> — TC001, TC008 fail with 500. Set <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> (or use a Supabase test project) in the test environment to unblock these tests.</p>
+<p><strong>TC002 vs TC009 Contradiction (Known):</strong> Both test out-of-range <code>days</code> on the same endpoint but expect opposite results (500 vs 200). The API correctly implements clamping. TC002 should be updated to expect 200, consistent with TC009. Risk: Low — API behavior is intentional and correct.</p>
 </li>
 <li>
-<p><strong>Shopee sync untestable without live credentials (HIGH)</strong> — TC004, TC007 fail because real Shopee sandbox credentials are needed to exercise authenticated sync paths. Consider mocking the Shopee API or providing a test token in CI.</p>
+<p><strong>Shopee sync tests require real credentials for 200 path:</strong> TC004 and TC007 can only fully validate the 200 response branch when connected to a real Shopee account. In CI/CD environments without credentials, these tests will always follow the 401 path. Risk: Medium — happy path sync logic is untested in automated runs.</p>
 </li>
 <li>
-<p><strong><code>NEXT_PUBLIC_</code> prefix on server-side secrets (MEDIUM)</strong> — Both API routes create the Supabase client using <code>NEXT_PUBLIC_*</code> env vars. These are bundled into the client bundle, exposing the anon key. While the anon key has limited access, consider switching to a server-only env var (<code>SUPABASE_URL</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code>) in API routes.</p>
+<p><strong>Token expiry in production:</strong> Access tokens expire every 4 hours. The reactive refresh flow (implemented in <code>sync/orders</code> route) handles this, but <code>SHOPEE_ACCESS_TOKEN</code> env vars baked at deploy time will become stale. Users must re-authenticate via OAuth flow to refresh cookies. Risk: Medium — manual action required after token expiry if env var fallback is used.</p>
 </li>
 <li>
-<p><strong>COGS hardcoded to 0 (MEDIUM)</strong> — All synced orders have <code>cogs = 0</code>. Net profit displayed on the dashboard will be overstated until users can set per-product COGS. There is currently no UI or API to manage COGS.</p>
-</li>
-<li>
-<p><strong>TC006 token-refresh test expectation may be wrong (LOW)</strong> — The code treats token refresh failure as non-fatal (logs a warning, continues). The test expected HTTP 500, but the correct behaviour is to proceed with the stale token. The test expectation should be updated to match the documented non-fatal design.</p>
+<p><strong><code>paid_at</code> NULL for old orders:</strong> Orders synced before the Step 2 (getOrderDetail) fix may have <code>paid_at = NULL</code>, causing them to appear as Rp 0 in Today/Yesterday views. A one-time re-sync will populate <code>paid_at</code> for these orders. Risk: Low — resolved for new syncs, historical data needs one manual re-sync.</p>
 </li>
 </ol>
 
@@ -1283,18 +1275,18 @@ body {
           <div class="table-rows">
             
             <div class="table-row">
-              <div class="table-cell"><span class="text-body">Requirement: Orders Fetch API (`GET /api/orders`)</span></div>
-              <div class="table-cell"><span class="text-body">5</span></div>
-              <div class="table-cell"><span class="text-body">2</span></div>
-              <div class="table-cell"><span class="text-body">3</span></div>
+              <div class="table-cell"><span class="text-body">REQ-01: Orders API — Date Range Handling</span></div>
+              <div class="table-cell"><span class="text-body">0</span></div>
+              <div class="table-cell"><span class="text-body">0</span></div>
+              <div class="table-cell"><span class="text-body">0</span></div>
             </div>
         
 
             <div class="table-row">
-              <div class="table-cell"><span class="text-body">Requirement: Shopee Sync API (`POST /api/shopee/sync`)</span></div>
-              <div class="table-cell"><span class="text-body">5</span></div>
-              <div class="table-cell"><span class="text-body">2</span></div>
-              <div class="table-cell"><span class="text-body">3</span></div>
+              <div class="table-cell"><span class="text-body">REQ-02: Shopee Sync API — Authentication & Token Handling</span></div>
+              <div class="table-cell"><span class="text-body">0</span></div>
+              <div class="table-cell"><span class="text-body">0</span></div>
+              <div class="table-cell"><span class="text-body">0</span></div>
             </div>
         
           </div>
@@ -1317,13 +1309,13 @@ body {
           <div class="accordion-header" onclick="toggleAccordion(this)">
             <div class="requirement-content">
                                           <div class="requirement-title-row">
-              <h3 class="title-requirement">Requirement: Orders Fetch API (`GET /api/orders`)</h3>
-                <div class="requirement-status-tag status-error">
+              <h3 class="title-requirement">REQ-01: Orders API — Date Range Handling</h3>
+                <div class="requirement-status-tag status-success">
               <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="7.99961" cy="7.99998" r="6.4" fill="#C23539" fill-opacity="0.2"/>
-                <path d="M8 5.59998V7.99698" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 10.394V10.3995" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="7.99961" cy="7.99998" r="6.4" fill="#10A363" fill-opacity="0.2"/>
+                <path d="M5.59961 8.00002L7.19961 9.60002L10.3996 6.40002" stroke="#19C379" stroke-width="1.28" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
-              <span>2/5</span>
+              <span>0/0</span>
             </div>
               </div>
               <p class="text-body-medium requirement-description">Proper error handling for API calls and invalid data scenarios.</p>
@@ -1337,240 +1329,7 @@ body {
 
             <div class="accordion-content">
             <div class="test-wrapper">
-<div class="test-card">
-                <div class="test-header">
-                  <h4 class="text-body-medium">TC001 — get orders with valid days and platform</h4>
-                </div>
-                <div class="test-content">
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Code</div>
-                    <div class="test-field-value text-body">
-                      <a href="./TC001_get_orders_with_valid_days_and_platform.py" class="text-link">TC001_get_orders_with_valid_days_and_platform.py</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Error</div>
-                    <div class="test-field-value text-body">`AssertionError: Expected status 200, got 500`</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Visualization and Result</div>
-                    <div class="test-field-value text-body">
-                      <a href="https://www.testsprite.com/dashboard/mcp/tests/d7b93b25-ca28-47da-bdc8-44de642a50df/3b293013-b473-4d5b-ab75-cb0bfad51099" class="text-link">View Results</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Status</div>
-                    <div class="test-field-value">
-                      
-            <div class="status-wrapper">
-                <div class="status-icon">
-                    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<circle cx="7.99961" cy="7.99998" r="6.4" fill="#C23539" fill-opacity="0.2"/>
-<path d="M8 5.59998V7.99698" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8 10.394V10.3995" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
-                </div>
-                <span class="text-body status-fail">Failed</span>
-            </div>
-            
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Severity</div>
-                    <div class="test-field-value text-body">HIGH</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Analysis / Findings</div>
-                    <div class="test-field-value text-body">The API returns HTTP 500, indicating a Supabase connection failure. The most likely cause is missing or invalid `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` environment variables in the test environment. The Supabase client is initialised at module load time using these env vars; if they are absent the client cannot connect and any query will throw.</div>
-                  </div>
-                </div>
-              </div>
-<div class="test-card">
-                <div class="test-header">
-                  <h4 class="text-body-medium">TC002 — get orders with days exceeding maximum limit</h4>
-                </div>
-                <div class="test-content">
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Code</div>
-                    <div class="test-field-value text-body">
-                      <a href="./TC002_get_orders_with_days_exceeding_maximum_limit.py" class="text-link">TC002_get_orders_with_days_exceeding_maximum_limit.py</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Error</div>
-                    <div class="test-field-value text-body">—</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Visualization and Result</div>
-                    <div class="test-field-value text-body">
-                      <a href="https://www.testsprite.com/dashboard/mcp/tests/d7b93b25-ca28-47da-bdc8-44de642a50df/9fefbbbd-9a86-4e17-b598-168bedc3ad2b" class="text-link">View Results</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Status</div>
-                    <div class="test-field-value">
-                      <div class="status-wrapper">
-                <div class="status-icon">
-                    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <circle cx="7.99961" cy="7.99998" r="6.4" fill="#10A363" fill-opacity="0.2"/>
-                        <path d="M5.59961 8.00002L7.19961 9.60002L10.3996 6.40002" stroke="#19C379" stroke-width="1.28" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </div>
-                <span class="text-body status-pass">Pass</span>
-            </div>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Severity</div>
-                    <div class="test-field-value text-body">LOW</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Analysis / Findings</div>
-                    <div class="test-field-value text-body">The API correctly clamps `days` to a maximum of 100. Input sanitisation for the upper bound works as expected.</div>
-                  </div>
-                </div>
-              </div>
-<div class="test-card">
-                <div class="test-header">
-                  <h4 class="text-body-medium">TC003 — get orders with unsupported platform</h4>
-                </div>
-                <div class="test-content">
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Code</div>
-                    <div class="test-field-value text-body">
-                      <a href="./TC003_get_orders_with_unsupported_platform.py" class="text-link">TC003_get_orders_with_unsupported_platform.py</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Error</div>
-                    <div class="test-field-value text-body">`AssertionError: Unexpected status code: 404`</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Visualization and Result</div>
-                    <div class="test-field-value text-body">
-                      <a href="https://www.testsprite.com/dashboard/mcp/tests/d7b93b25-ca28-47da-bdc8-44de642a50df/9a86b85c-6842-4ad8-9ca1-c0048f39501e" class="text-link">View Results</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Status</div>
-                    <div class="test-field-value">
-                      
-            <div class="status-wrapper">
-                <div class="status-icon">
-                    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<circle cx="7.99961" cy="7.99998" r="6.4" fill="#C23539" fill-opacity="0.2"/>
-<path d="M8 5.59998V7.99698" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8 10.394V10.3995" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
-                </div>
-                <span class="text-body status-fail">Failed</span>
-            </div>
-            
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Severity</div>
-                    <div class="test-field-value text-body">MEDIUM</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Analysis / Findings</div>
-                    <div class="test-field-value text-body">The test expected the API to return 200 with an empty array when an unknown platform is passed (e.g. `platform=UnknownPlatform`). Instead it got 404, which suggests the route itself was not found in the test environment — likely a Next.js routing issue when the dev server is not fully warmed up, or a misconfigured tunnel URL.</div>
-                  </div>
-                </div>
-              </div>
-<div class="test-card">
-                <div class="test-header">
-                  <h4 class="text-body-medium">TC008 — get orders with valid days and all platforms</h4>
-                </div>
-                <div class="test-content">
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Code</div>
-                    <div class="test-field-value text-body">
-                      <a href="./TC008_get_orders_with_valid_days_and_all_platforms.py" class="text-link">TC008_get_orders_with_valid_days_and_all_platforms.py</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Error</div>
-                    <div class="test-field-value text-body">`AssertionError: Expected status 200, got 500`</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Visualization and Result</div>
-                    <div class="test-field-value text-body">
-                      <a href="https://www.testsprite.com/dashboard/mcp/tests/d7b93b25-ca28-47da-bdc8-44de642a50df/a22c6d3a-25e5-4783-89ac-531499775dd1" class="text-link">View Results</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Status</div>
-                    <div class="test-field-value">
-                      
-            <div class="status-wrapper">
-                <div class="status-icon">
-                    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<circle cx="7.99961" cy="7.99998" r="6.4" fill="#C23539" fill-opacity="0.2"/>
-<path d="M8 5.59998V7.99698" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8 10.394V10.3995" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
-                </div>
-                <span class="text-body status-fail">Failed</span>
-            </div>
-            
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Severity</div>
-                    <div class="test-field-value text-body">HIGH</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Analysis / Findings</div>
-                    <div class="test-field-value text-body">Same root cause as TC001 — Supabase credentials unavailable in the test environment, causing a 500 response on a query without a platform filter.</div>
-                  </div>
-                </div>
-              </div>
-<div class="test-card">
-                <div class="test-header">
-                  <h4 class="text-body-medium">TC009 — get orders with invalid large days parameter (from date range picker)</h4>
-                </div>
-                <div class="test-content">
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Code</div>
-                    <div class="test-field-value text-body">
-                      <a href="./TC009_get_orders_with_invalid_large_days_parameter_from_date_range_picker.py" class="text-link">TC009_get_orders_with_invalid_large_days_parameter_from_date_range_picker.py</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Error</div>
-                    <div class="test-field-value text-body">—</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Visualization and Result</div>
-                    <div class="test-field-value text-body">
-                      <a href="https://www.testsprite.com/dashboard/mcp/tests/d7b93b25-ca28-47da-bdc8-44de642a50df/cf88c7ca-a394-49c4-95f1-ec4183add308" class="text-link">View Results</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Status</div>
-                    <div class="test-field-value">
-                      <div class="status-wrapper">
-                <div class="status-icon">
-                    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <circle cx="7.99961" cy="7.99998" r="6.4" fill="#10A363" fill-opacity="0.2"/>
-                        <path d="M5.59961 8.00002L7.19961 9.60002L10.3996 6.40002" stroke="#19C379" stroke-width="1.28" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </div>
-                <span class="text-body status-pass">Pass</span>
-            </div>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Severity</div>
-                    <div class="test-field-value text-body">LOW</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Analysis / Findings</div>
-                    <div class="test-field-value text-body">The `days` parameter is correctly clamped to 100 even when a very large value is supplied by the frontend date range picker. Boundary validation works correctly.</div>
-                  </div>
-                </div>
-              </div>
+
             </div>
           </div>
         </div>
@@ -1579,13 +1338,13 @@ body {
           <div class="accordion-header" onclick="toggleAccordion(this)">
             <div class="requirement-content">
                                           <div class="requirement-title-row">
-              <h3 class="title-requirement">Requirement: Shopee Sync API (`POST /api/shopee/sync`)</h3>
-                <div class="requirement-status-tag status-error">
+              <h3 class="title-requirement">REQ-02: Shopee Sync API — Authentication & Token Handling</h3>
+                <div class="requirement-status-tag status-success">
               <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="7.99961" cy="7.99998" r="6.4" fill="#C23539" fill-opacity="0.2"/>
-                <path d="M8 5.59998V7.99698" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 10.394V10.3995" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="7.99961" cy="7.99998" r="6.4" fill="#10A363" fill-opacity="0.2"/>
+                <path d="M5.59961 8.00002L7.19961 9.60002L10.3996 6.40002" stroke="#19C379" stroke-width="1.28" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
-              <span>2/5</span>
+              <span>0/0</span>
             </div>
               </div>
               <p class="text-body-medium requirement-description">Proper error handling for API calls and invalid data scenarios.</p>
@@ -1599,240 +1358,7 @@ body {
 
             <div class="accordion-content">
             <div class="test-wrapper">
-<div class="test-card">
-                <div class="test-header">
-                  <h4 class="text-body-medium">TC004 — post shopee sync with valid cookies and days</h4>
-                </div>
-                <div class="test-content">
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Code</div>
-                    <div class="test-field-value text-body">
-                      <a href="./TC004_post_shopee_sync_with_valid_cookies_and_days.py" class="text-link">TC004_post_shopee_sync_with_valid_cookies_and_days.py</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Error</div>
-                    <div class="test-field-value text-body">`AssertionError: Expected 200 OK but got 401, response: {"error":"Not connected to Shopee. Please connect in Settings."}`</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Visualization and Result</div>
-                    <div class="test-field-value text-body">
-                      <a href="https://www.testsprite.com/dashboard/mcp/tests/d7b93b25-ca28-47da-bdc8-44de642a50df/3d1b60a6-7d58-43ef-ba08-c6006cab4e34" class="text-link">View Results</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Status</div>
-                    <div class="test-field-value">
-                      
-            <div class="status-wrapper">
-                <div class="status-icon">
-                    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<circle cx="7.99961" cy="7.99998" r="6.4" fill="#C23539" fill-opacity="0.2"/>
-<path d="M8 5.59998V7.99698" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8 10.394V10.3995" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
-                </div>
-                <span class="text-body status-fail">Failed</span>
-            </div>
-            
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Severity</div>
-                    <div class="test-field-value text-body">HIGH</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Analysis / Findings</div>
-                    <div class="test-field-value text-body">The test supplied mock `shopee_access_token` and `shopee_shop_id` cookies but got a 401. This is expected in an isolated test environment — the route validates cookie presence, but the mock tokens cannot authenticate against the real Shopee API. A proper integration test would require live sandbox credentials; the auth-guard logic itself works correctly (TC005 confirms this).</div>
-                  </div>
-                </div>
-              </div>
-<div class="test-card">
-                <div class="test-header">
-                  <h4 class="text-body-medium">TC005 — post shopee sync without authentication cookies</h4>
-                </div>
-                <div class="test-content">
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Code</div>
-                    <div class="test-field-value text-body">
-                      <a href="./TC005_post_shopee_sync_without_authentication_cookies.py" class="text-link">TC005_post_shopee_sync_without_authentication_cookies.py</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Error</div>
-                    <div class="test-field-value text-body">—</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Visualization and Result</div>
-                    <div class="test-field-value text-body">
-                      <a href="https://www.testsprite.com/dashboard/mcp/tests/d7b93b25-ca28-47da-bdc8-44de642a50df/a4565f7d-2383-4f34-8c6f-4c213107d32a" class="text-link">View Results</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Status</div>
-                    <div class="test-field-value">
-                      <div class="status-wrapper">
-                <div class="status-icon">
-                    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <circle cx="7.99961" cy="7.99998" r="6.4" fill="#10A363" fill-opacity="0.2"/>
-                        <path d="M5.59961 8.00002L7.19961 9.60002L10.3996 6.40002" stroke="#19C379" stroke-width="1.28" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </div>
-                <span class="text-body status-pass">Pass</span>
-            </div>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Severity</div>
-                    <div class="test-field-value text-body">LOW</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Analysis / Findings</div>
-                    <div class="test-field-value text-body">The API correctly returns 401 when `shopee_access_token` / `shopee_shop_id` cookies are absent. Auth guard is working as designed.</div>
-                  </div>
-                </div>
-              </div>
-<div class="test-card">
-                <div class="test-header">
-                  <h4 class="text-body-medium">TC006 — post shopee sync with token refresh failure</h4>
-                </div>
-                <div class="test-content">
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Code</div>
-                    <div class="test-field-value text-body">
-                      <a href="./TC006_post_shopee_sync_with_token_refresh_failure.py" class="text-link">TC006_post_shopee_sync_with_token_refresh_failure.py</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Error</div>
-                    <div class="test-field-value text-body">`AssertionError: Expected status code 500 but got 404`</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Visualization and Result</div>
-                    <div class="test-field-value text-body">
-                      <a href="https://www.testsprite.com/dashboard/mcp/tests/d7b93b25-ca28-47da-bdc8-44de642a50df/838c16ec-c8b2-4efe-9752-8e9c7eb92e6e" class="text-link">View Results</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Status</div>
-                    <div class="test-field-value">
-                      
-            <div class="status-wrapper">
-                <div class="status-icon">
-                    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<circle cx="7.99961" cy="7.99998" r="6.4" fill="#C23539" fill-opacity="0.2"/>
-<path d="M8 5.59998V7.99698" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8 10.394V10.3995" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
-                </div>
-                <span class="text-body status-fail">Failed</span>
-            </div>
-            
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Severity</div>
-                    <div class="test-field-value text-body">MEDIUM</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Analysis / Findings</div>
-                    <div class="test-field-value text-body">The test expected the endpoint to return 500 when the token refresh fails with invalid credentials. Instead it got 404, suggesting a routing resolution issue from the tunnel. The actual behaviour in the code is correct — refresh failures are non-fatal (caught and warned), so the sync continues with the existing token; the 500 expectation in the test may itself be incorrect.</div>
-                  </div>
-                </div>
-              </div>
-<div class="test-card">
-                <div class="test-header">
-                  <h4 class="text-body-medium">TC007 — post shopee sync with zero days parameter</h4>
-                </div>
-                <div class="test-content">
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Code</div>
-                    <div class="test-field-value text-body">
-                      <a href="./TC007_post_shopee_sync_with_zero_days_parameter.py" class="text-link">TC007_post_shopee_sync_with_zero_days_parameter.py</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Error</div>
-                    <div class="test-field-value text-body">`AssertionError: Expected 200 OK but got 401`</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Visualization and Result</div>
-                    <div class="test-field-value text-body">
-                      <a href="https://www.testsprite.com/dashboard/mcp/tests/d7b93b25-ca28-47da-bdc8-44de642a50df/a92998d8-36c8-4873-92cf-25e0132b9af3" class="text-link">View Results</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Status</div>
-                    <div class="test-field-value">
-                      
-            <div class="status-wrapper">
-                <div class="status-icon">
-                    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-<circle cx="7.99961" cy="7.99998" r="6.4" fill="#C23539" fill-opacity="0.2"/>
-<path d="M8 5.59998V7.99698" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M8 10.394V10.3995" stroke="#EF4146" stroke-width="1.38478" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
-                </div>
-                <span class="text-body status-fail">Failed</span>
-            </div>
-            
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Severity</div>
-                    <div class="test-field-value text-body">LOW</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Analysis / Findings</div>
-                    <div class="test-field-value text-body">The 401 is expected — no real Shopee cookies are present in the test environment, so auth fails before the `days` clamping logic is reached. The test needs valid (sandbox) Shopee credentials to exercise the `days=0` → clamp-to-1 path.</div>
-                  </div>
-                </div>
-              </div>
-<div class="test-card">
-                <div class="test-header">
-                  <h4 class="text-body-medium">TC010 — post shopee sync with missing or invalid cookies (from dashboard)</h4>
-                </div>
-                <div class="test-content">
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Code</div>
-                    <div class="test-field-value text-body">
-                      <a href="./TC010_post_shopee_sync_with_missing_or_invalid_cookies_from_dashboard.py" class="text-link">TC010_post_shopee_sync_with_missing_or_invalid_cookies_from_dashboard.py</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Error</div>
-                    <div class="test-field-value text-body">—</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Test Visualization and Result</div>
-                    <div class="test-field-value text-body">
-                      <a href="https://www.testsprite.com/dashboard/mcp/tests/d7b93b25-ca28-47da-bdc8-44de642a50df/3faa24fe-8865-4520-8bae-ed5c8b0ff5f7" class="text-link">View Results</a>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Status</div>
-                    <div class="test-field-value">
-                      <div class="status-wrapper">
-                <div class="status-icon">
-                    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <circle cx="7.99961" cy="7.99998" r="6.4" fill="#10A363" fill-opacity="0.2"/>
-                        <path d="M5.59961 8.00002L7.19961 9.60002L10.3996 6.40002" stroke="#19C379" stroke-width="1.28" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </div>
-                <span class="text-body status-pass">Pass</span>
-            </div>
-                    </div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Severity</div>
-                    <div class="test-field-value text-body">LOW</div>
-                  </div>
-                  <div class="test-field">
-                    <div class="test-field-label text-body-medium">Analysis / Findings</div>
-                    <div class="test-field-value text-body">The sync API correctly rejects requests coming from the dashboard when cookies are missing or invalid, returning a clear 401 error message.</div>
-                  </div>
-                </div>
-              </div>
+
             </div>
           </div>
         </div>

@@ -2,30 +2,23 @@ import requests
 
 def test_post_shopee_sync_missing_or_invalid_cookies():
     base_url = "http://localhost:3000"
-    endpoint = "/api/shopee/sync"
-    url = f"{base_url}{endpoint}?days=30"
-    headers = {
-        "Content-Type": "application/json"
-    }
-    # Case 1: Missing cookies completely
-    try:
-        response = requests.post(url, headers=headers, timeout=30)
-        assert response.status_code == 401, f"Expected 401 but got {response.status_code}"
-        assert "Not connected to Shopee" in response.text or "Not connected" in response.text, "Expected not connected error message in response"
-    except requests.RequestException as e:
-        assert False, f"Request failed with exception: {e}"
+    url = f"{base_url}/api/shopee/sync?days=30"
+    timeout = 30
 
-    # Case 2: Invalid cookies (e.g., invalid values)
+    # Case 1: Missing cookies
+    response_missing = requests.post(url, timeout=timeout)
+    assert response_missing.status_code == 401, f"Expected 401 for missing cookies, got {response_missing.status_code}"
+    assert "Not connected to Shopee" in response_missing.text or "not connected" in response_missing.text.lower()
+
+    # Case 2: Invalid cookies
     invalid_cookies = {
-        "shopee_access_token": "invalid_token",
-        "shopee_shop_id": "invalid_shop_id"
+        "shopee_access_token": "invalidtoken",
+        "shopee_shop_id": "invalidshopid"
     }
-    try:
-        response = requests.post(url, headers=headers, cookies=invalid_cookies, timeout=30)
-        assert response.status_code == 401, f"Expected 401 but got {response.status_code}"
-        assert "Not connected to Shopee" in response.text or "Not connected" in response.text, "Expected not connected error message in response"
-    except requests.RequestException as e:
-        assert False, f"Request failed with exception: {e}"
+    response_invalid = requests.post(url, cookies=invalid_cookies, timeout=timeout)
+    # Server should respond with 401 for invalid cookies as well
+    assert response_invalid.status_code == 401, f"Expected 401 for invalid cookies, got {response_invalid.status_code}"
+    assert "Not connected to Shopee" in response_invalid.text or "not connected" in response_invalid.text.lower()
 
 
 test_post_shopee_sync_missing_or_invalid_cookies()
