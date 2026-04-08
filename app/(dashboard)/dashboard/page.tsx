@@ -98,14 +98,15 @@ export default function DashboardPage() {
       .catch(() => { /* keep empty */ })
   }, [])
 
-  async function handleShopeeSync() {
-    setSyncStatus({ state: 'loading', msg: 'Listing orders…' })
+  async function handleShopeeSync(days = 30) {
+    setSyncStatus({ state: 'loading', msg: `Listing orders (last ${days} days)…` })
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 300_000) // 5 min — details loop needs time for large stores
     try {
-      // ── Step 1: Fetch order list (fast — no details, finishes in < 5s) ──────
-      // Uses 7-day window by default: 1 Shopee API chunk, well under 10s limit.
-      const ordersRes = await fetch('/api/shopee/sync/orders?days=7', { method: 'POST', signal: controller.signal })
+      // ── Step 1: Fetch order list stubs ────────────────────────────────────
+      // Default: 30 days (2 × 15-day chunks). Full sync: 90 days (6 chunks).
+      // Each chunk paginates independently; all results upserted as stubs.
+      const ordersRes = await fetch(`/api/shopee/sync/orders?days=${days}`, { method: 'POST', signal: controller.signal })
       const ordersData = await ordersRes.json().catch(() => ({ error: `Server error (HTTP ${ordersRes.status})` }))
       if (ordersData.reconnect_required) {
         clearTimeout(timeout)
@@ -149,31 +150,11 @@ export default function DashboardPage() {
         if (Array.isArray(data)) setLiveOrders(data)
       }).catch(() => {})
 
-      setSyncStatus({ state: 'loading', msg: `Details synced: ${detailsSynced} — syncing escrow…` })
-
-      // ── Step 3: Loop escrow batches until done ─────────────────────────────
-      let escrowSynced = 0
-      let escrowIteration = 0
-      while (true) {
-        const escrowRes = await fetch('/api/shopee/sync/escrow', { method: 'POST', signal: controller.signal })
-        const escrowData = await escrowRes.json().catch(() => ({ done: true, synced: 0, remaining: 0 }))
-        if (!escrowRes.ok) break
-
-        escrowSynced += escrowData.synced ?? 0
-        escrowIteration++
-        setSyncStatus({ state: 'loading', msg: `Escrow: ${escrowSynced} synced, ${escrowData.remaining ?? 0} remaining…` })
-
-        if (escrowIteration % 5 === 0) {
-          fetch('/api/orders?days=90').then((r) => r.json()).then((data) => {
-            if (Array.isArray(data)) setLiveOrders(data)
-          }).catch(() => {})
-        }
-
-        if (escrowData.done) break
-      }
+      // Escrow sync is handled by a background cron job (every 15 min).
+      // Skipping it here prevents timeouts on large stores (1000+ orders).
 
       clearTimeout(timeout)
-      setSyncStatus({ state: 'success', orderCount: queued, escrowCount: escrowSynced })
+      setSyncStatus({ state: 'success', orderCount: queued, escrowCount: 0 })
 
       // Final refresh with fully-synced data
       const ordFinal = await fetch('/api/orders?days=90').then((r) => r.json())
@@ -192,10 +173,15 @@ export default function DashboardPage() {
   async function handleEscrowSync() {
     setEscrowSyncStatus({ state: 'loading' })
     try {
-      const res = await fetch('/api/shopee/sync-escrow', { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? 'Escrow sync failed')
-      setEscrowSyncStatus({ state: 'success', count: data.synced_escrow })
+      let totalSynced = 0
+      for (;;) {
+        const res = await fetch('/api/shopee/sync/escrow', { method: 'POST' })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? 'Escrow sync failed')
+        totalSynced += data.synced ?? 0
+        if (data.done) break
+      }
+      setEscrowSyncStatus({ state: 'success', count: totalSynced })
       const ord = await fetch('/api/orders?days=90').then((r) => r.json())
       setLiveOrders(Array.isArray(ord) ? ord : [])
     } catch (err) {
@@ -420,12 +406,24 @@ export default function DashboardPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={handleShopeeSync}
+              onClick={() => handleShopeeSync(30)}
               disabled={syncStatus.state === 'loading'}
               className="border-orange-200 text-orange-600 hover:bg-orange-50 hover:text-orange-700"
             >
               <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${syncStatus.state === 'loading' ? 'animate-spin' : ''}`} />
-              {syncStatus.state === 'loading' ? 'Syncing…' : 'Sync Shopee (Orders + Escrow)'}
+              {syncStatus.state === 'loading' ? 'Syncing…' : 'Sync Shopee (30 days)'}
+            </Button>
+          )}
+          {shopeeConnected === true && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleShopeeSync(90)}
+              disabled={syncStatus.state === 'loading'}
+              className="border-purple-200 text-purple-600 hover:bg-purple-50 hover:text-purple-700"
+            >
+              <Database className={`w-3.5 h-3.5 mr-1.5 ${syncStatus.state === 'loading' ? 'animate-spin' : ''}`} />
+              {syncStatus.state === 'loading' ? 'Syncing…' : 'Full Sync (90 days)'}
             </Button>
           )}
           {shopeeConnected === true && (
@@ -462,50 +460,56 @@ export default function DashboardPage() {
 
       {/* KPI Cards */}
       <div className="space-y-4">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           <KpiCard
-            title="GMV (Penjualan)"
+            title="GMV"
             value={formatCurrency(gmvTotal)}
             icon={<Tag className="w-4 h-4" />}
+            tooltip="Total harga item sebelum voucher/diskon apapun. Termasuk pesanan dibatalkan."
           />
           <KpiCard
-            title="Total Orders (Paid)"
+            title="Penjualan (Shopee)"
+            value={formatCurrency(metrics.penjualan)}
+            icon={<DollarSign className="w-4 h-4" />}
+            tooltip="Definisi Shopee Seller Center: GMV dikurangi voucher dari penjual saja. Termasuk pesanan dibatalkan & dikembalikan."
+            colorScheme="orange"
+          />
+          <KpiCard
+            title="Pesanan Dibayar"
             value={paidOrders.toLocaleString()}
             icon={<ShoppingCart className="w-4 h-4" />}
+            tooltip="Jumlah order yang sudah dikonfirmasi pembayarannya. Tidak termasuk UNPAID, CANCELLED, dan RETURNED."
           />
           <KpiCard
-            title="Cancelled Orders"
+            title="Pesanan Dibatalkan"
             value={cancelledOrders.toLocaleString()}
             icon={<Package className="w-4 h-4" />}
+            tooltip="Order yang dibatalkan atau dikembalikan dalam periode ini. Shopee menghitung ini dalam 'Total Penjualan'."
           />
           <KpiCard
             title="Conversion"
             value={conversionHint}
             icon={<Percent className="w-4 h-4" />}
+            tooltip="Paid rate = Pesanan Dibayar / (Pesanan Dibayar + Dibatalkan)."
           />
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <KpiCard
-            title="Revenue (buyer paid)"
-            value={formatCurrency(metrics.revenue)}
-            icon={<DollarSign className="w-4 h-4" />}
-          />
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
           <KpiCard
             title={escrowSyncedCount > 0 ? 'Platform Fee ✓' : 'Platform Fee (est.)'}
             value={formatCurrency(platformFees)}
             icon={<Megaphone className="w-4 h-4" />}
             tooltip={escrowSyncedCount > 0
-              ? `Escrow-verified: ${escrowSyncedCount} orders. Commission + Service + AMS + Processing fee.`
-              : 'Estimated from 3% commission rate. Run "Sync Escrow" for real figures.'}
+              ? `Terverifikasi escrow: ${escrowSyncedCount} order. Komisi + Service Fee + AMS + Processing fee.`
+              : 'Estimasi dari tarif komisi 3%. Jalankan "Sync Escrow" untuk angka aktual.'}
           />
           <KpiCard
-            title={escrowSyncedCount > 0 ? 'Net Revenue (escrow) ✓' : 'Net Revenue (pending escrow)'}
+            title={escrowSyncedCount > 0 ? 'Escrow (Net Revenue) ✓' : 'Escrow (Net Revenue)'}
             value={formatCurrency(netRevenue)}
             icon={<TrendingUp className="w-4 h-4" />}
             tooltip={escrowSyncedCount > 0
-              ? `Based on escrow_amount for ${escrowSyncedCount} verified orders.`
-              : 'Estimated: Revenue minus fees. Run "Sync Escrow" for real escrow figures.'}
+              ? `Uang yang benar-benar masuk ke rekening seller. Dari escrow_amount untuk ${escrowSyncedCount} order terverifikasi.`
+              : 'Estimasi: Revenue dikurangi biaya platform. Jalankan "Sync Escrow" untuk angka escrow aktual.'}
           />
           <KpiCard
             title="Net Profit"

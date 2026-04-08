@@ -8,9 +8,10 @@ import {
   type ShopeeOrderSummary,
 } from '@/lib/shopee'
 
-// This route only lists orders and upserts stubs — fast, well under 10s.
-// Detail enrichment is handled by /sync/details (called in a loop by the UI).
-export const maxDuration = 30
+// This route only lists orders and upserts stubs — no detail fetching.
+// 90-day full sync: 6 × 15-day chunks, each with its own pagination loop.
+// Worst case: ~6 chunks × ~3 paginated API calls × ~2s = ~36s. Use 60s to be safe.
+export const maxDuration = 60
 
 const supabase = createClient(
   process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -119,16 +120,49 @@ export async function POST(request: Request) {
 
       if (allSummaries.length === 0) return
 
-      // Upsert stubs in batches of 100.
-      // ignoreDuplicates: true — skip existing rows so already-enriched orders
-      // (revenue > 0, escrow_synced = true) are never overwritten back to zero.
+      // Process stubs in batches of 100.
+      // Split into INSERT (new orders only) + UPDATE (status & gmv only for existing).
+      // This ensures status changes (e.g. UNPAID → READY_TO_SHIP) are captured
+      // without overwriting already-enriched fields (revenue, escrow_synced, etc.).
       const STUB_BATCH = 100
       for (let i = 0; i < allSummaries.length; i += STUB_BATCH) {
-        const rows = allSummaries.slice(i, i + STUB_BATCH).map(mapSummaryToStub)
-        const { error } = await supabase
+        const batch = allSummaries.slice(i, i + STUB_BATCH)
+        const batchOrderIds = batch.map((s) => s.order_sn)
+
+        // Step 1: Find which order_ids already exist in DB.
+        const { data: existing, error: fetchError } = await supabase
           .from('orders')
-          .upsert(rows, { onConflict: 'order_id', ignoreDuplicates: true })
-        if (error) throw new Error(`Supabase stub upsert failed: ${error.message}`)
+          .select('order_id')
+          .in('order_id', batchOrderIds)
+        if (fetchError) throw new Error(`Supabase fetch existing orders failed: ${fetchError.message}`)
+
+        const existingIdSet = new Set((existing ?? []).map((r) => r.order_id as string))
+
+        // Step 2: INSERT stubs for orders not yet in DB.
+        const newRows = batch
+          .filter((s) => !existingIdSet.has(s.order_sn))
+          .map(mapSummaryToStub)
+        if (newRows.length > 0) {
+          const { error: insertError } = await supabase.from('orders').insert(newRows)
+          if (insertError) throw new Error(`Supabase stub insert failed: ${insertError.message}`)
+        }
+
+        // Step 3: UPDATE only status & gmv for orders that already exist.
+        // Never touch revenue, escrow_synced, buyer_paid_amount, etc.
+        const existingRows = batch.filter((s) => existingIdSet.has(s.order_sn))
+        for (const summary of existingRows) {
+          const { error: updateError } = await supabase
+            .from('orders')
+            .update({
+              status: summary.order_status ?? 'UNKNOWN',
+              gmv: summary.total_amount ?? 0,
+              paid_at: summary.pay_time
+                ? new Date(summary.pay_time * 1000).toISOString()
+                : undefined,
+            })
+            .eq('order_id', summary.order_sn)
+          if (updateError) throw new Error(`Supabase status update failed: ${updateError.message}`)
+        }
       }
 
       synced = allSummaries.length

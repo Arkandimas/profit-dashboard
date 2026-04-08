@@ -378,6 +378,22 @@ export function orderCountsForShopeeKpi(status: string | null | undefined): bool
 }
 
 export function calcMetrics(orders: Order[], adSpend: AdSpend[], expenses: Expense[]) {
+  // "Penjualan" = Shopee Seller Center definition:
+  //   all orders that were ever paid (including cancelled & returned),
+  //   after subtracting seller-funded vouchers only (not Shopee vouchers).
+  // This is what Shopee shows as "Total Penjualan" in the dashboard header.
+  const allPaidOrders = orders.filter(
+    (o) => (o.status ?? '').toUpperCase() !== 'UNPAID'
+  )
+  const cancelledCount = allPaidOrders.filter((o) =>
+    ['CANCELLED', 'CANCELED', 'RETURNED', 'REFUNDED'].includes((o.status ?? '').toUpperCase())
+  ).length
+  const penjualan = allPaidOrders.reduce(
+    (s, o) => s + (o.gmv ?? 0) - (o.voucher_from_seller ?? 0),
+    0
+  )
+
+  // Active orders: exclude cancelled/returned — used for COGS, revenue, net profit.
   const completedOrders = orders.filter((o) => orderCountsForShopeeKpi(o.status))
   const gmv = completedOrders.reduce((s, o) => s + (o.gmv ?? o.revenue), 0)
   const revenue = completedOrders.reduce((s, o) => s + o.revenue, 0)
@@ -412,6 +428,8 @@ export function calcMetrics(orders: Order[], adSpend: AdSpend[], expenses: Expen
     gmv,
     sellerDiscount,
     revenue,
+    penjualan,      // Shopee "Total Penjualan": includes cancelled, minus seller voucher
+    cancelledCount, // count of cancelled/returned orders in the period
     orders: completedOrders.length,
     cogs,
     shippingCost,

@@ -26,8 +26,9 @@ const COOKIE_OPTS = {
 // Orders processed per call. 10 order_sn per getOrderDetail call × N calls.
 const BATCH_SIZE = 50
 
-// Uppercase: matches how we store status from Shopee API
-const EXCLUDED_STATUSES = ['UNPAID', 'CANCELLED', 'CANCELED', 'RETURNED', 'REFUNDED']
+// Only exclude UNPAID — cancelled/returned orders also need detail enrichment
+// so their gmv, voucher_from_seller, etc. are populated for Penjualan KPI.
+const EXCLUDED_STATUSES = ['UNPAID']
 
 function safeIsoFromUnixSeconds(value: number | null | undefined): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null
@@ -73,6 +74,7 @@ function mapDetailToRow(order: ShopeeOrderDetail) {
     commission_fee: 0,
     service_fee: 0,
     status: order.order_status ?? 'UNKNOWN',
+    details_synced: true,
     ...(createdAt ? { created_at: createdAt } : {}),
     ...(paidAt ? { paid_at: paidAt } : {}),
   }
@@ -128,19 +130,14 @@ export async function POST(request: Request) {
     }
 
     // ── Find orders needing detail enrichment ─────────────────────────────────
-    // Orders from getOrderList have revenue=0 (buyer_total_amount not available there).
-    // revenue=0 is the "needs details" proxy.
-    const fromDate = new Date()
-    fromDate.setDate(fromDate.getDate() - 30)
-    const fromIso = fromDate.toISOString()
-
+    // Use details_synced flag instead of revenue=0 to avoid infinite loop when
+    // buyer_total_amount is legitimately 0 or null.
     const { data: pendingOrders, error: queryError } = await supabase
       .from('orders')
       .select('order_id')
       .eq('platform', 'Shopee')
-      .eq('revenue', 0)
+      .eq('details_synced', false)
       .not('status', 'in', `(${EXCLUDED_STATUSES.join(',')})`)
-      .gte('created_at', fromIso)
       .order('created_at', { ascending: false })
       .limit(BATCH_SIZE)
 
@@ -164,7 +161,15 @@ export async function POST(request: Request) {
       updatedCount = 0
       for (let i = 0; i < orderSns.length; i += SHOPEE_BATCH) {
         const batch = orderSns.slice(i, i + SHOPEE_BATCH)
-        const details = await getOrderDetail(batch, tkn, shopId)
+        let details: ShopeeOrderDetail[]
+        try {
+          details = await getOrderDetail(batch, tkn, shopId)
+        } catch (err) {
+          // Propagate auth errors so the outer handler can retry with a fresh token.
+          // Swallow all other per-batch failures (e.g. stale/invalid order_sn).
+          if (isTokenExpiredError(err)) throw err
+          continue
+        }
         if (details.length > 0) {
           const rows = details.map(mapDetailToRow)
           const { error } = await supabase
@@ -218,9 +223,8 @@ export async function POST(request: Request) {
       .from('orders')
       .select('order_id', { count: 'exact', head: true })
       .eq('platform', 'Shopee')
-      .eq('revenue', 0)
+      .eq('details_synced', false)
       .not('status', 'in', `(${EXCLUDED_STATUSES.join(',')})`)
-      .gte('created_at', fromIso)
 
     const res = NextResponse.json({
       success: true,

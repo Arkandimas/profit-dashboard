@@ -6,10 +6,10 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-// Shopee statuses that will never contribute to "Pesanan Dibayar" revenue.
-// Filtering these at the DB level reduces the payload size returned to the client.
-// Uppercase: matches how Shopee returns status (CANCELLED, UNPAID, etc.)
-const EXCLUDED_STATUSES = ['UNPAID', 'CANCELLED', 'CANCELED', 'RETURNED', 'REFUNDED']
+// Only exclude UNPAID at the DB level — cancelled/returned orders are sent to
+// the client so the dashboard can compute Penjualan (Shopee definition) and
+// show cancelled order counts. The client filters by status for each KPI.
+const EXCLUDED_STATUSES = ['UNPAID']
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)

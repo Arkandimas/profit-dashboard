@@ -243,7 +243,7 @@ export async function getOrderList(
 
   for (;;) {
     const params: Record<string, string | number> = {
-      time_range_field: 'create_time',
+      time_range_field: 'pay_time',
       time_from: fromTs,
       time_to: toTs,
       page_size: 100,
@@ -427,11 +427,12 @@ export interface ShopeeEscrowDetail {
 export async function getEscrowDetail(
   orderSn: string,
   accessToken: string,
-  shopId: number
+  shopId: number,
+  timeoutMs = 15_000
 ): Promise<ShopeeEscrowDetail> {
   const path = '/api/v2/payment/get_escrow_detail'
   const url = buildUrl(path, { order_sn: orderSn }, accessToken, shopId)
-  const res = await shopFetch(url)
+  const res = await shopFetch(url, {}, timeoutMs)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(`getEscrowDetail HTTP ${res.status}: ${body.message || body.error || 'unknown'}`)
