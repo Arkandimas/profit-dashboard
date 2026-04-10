@@ -15,6 +15,7 @@ export interface Order {
   gmv?: number
   buyer_paid_amount?: number
   voucher_amount?: number
+  /** @deprecated — tidak digunakan lagi. Gunakan buyer_paid_amount untuk profit calc, gmv untuk Shopee KPI. */
   revenue: number
   cogs: number
   shipping_fee: number

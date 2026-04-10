@@ -24,8 +24,8 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms))
 }
 
-// Statuses that have settled payment and thus have escrow data available.
-const ESCROW_ELIGIBLE_STATUSES = ['completed', 'to_confirm_receive']
+// Uppercase: matches how Shopee returns status (COMPLETED, TO_CONFIRM_RECEIVE)
+const ESCROW_ELIGIBLE_STATUSES = ['COMPLETED', 'TO_CONFIRM_RECEIVE']
 
 export async function POST() {
   try {

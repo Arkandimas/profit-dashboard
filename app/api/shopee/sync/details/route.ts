@@ -156,9 +156,14 @@ export async function POST(request: Request) {
     // ── Fetch details in sub-batches of 10 (Shopee API limit) ─────────────────
     const SHOPEE_BATCH = 10
     let updatedCount = 0
+    // Tracks non-UNPAID orders whose pay_time is missing from Shopee — these will
+    // have no paid_at in DB and fall back to created_at for date bucketing.
+    // Exposed in the response so callers can detect data quality issues.
+    let missingPaidAtCount = 0
 
     const fetchAndUpsert = async (tkn: string) => {
       updatedCount = 0
+      missingPaidAtCount = 0
       for (let i = 0; i < orderSns.length; i += SHOPEE_BATCH) {
         const batch = orderSns.slice(i, i + SHOPEE_BATCH)
         let details: ShopeeOrderDetail[]
@@ -171,6 +176,10 @@ export async function POST(request: Request) {
           continue
         }
         if (details.length > 0) {
+          // Count paid orders with no pay_time — paid_at won't be written for these.
+          missingPaidAtCount += details.filter(
+            (d) => (d.order_status ?? '').toUpperCase() !== 'UNPAID' && !d.pay_time
+          ).length
           const rows = details.map(mapDetailToRow)
           const { error } = await supabase
             .from('orders')
@@ -231,6 +240,7 @@ export async function POST(request: Request) {
       updated: updatedCount,
       remaining: remaining ?? 0,
       done: (remaining ?? 0) === 0,
+      ...(missingPaidAtCount > 0 ? { missing_paid_at: missingPaidAtCount } : {}),
     })
     persistTokensIfRefreshed(res, refreshedAccessToken, refreshedRefreshToken)
     return res

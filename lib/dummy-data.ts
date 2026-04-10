@@ -378,41 +378,60 @@ export function orderCountsForShopeeKpi(status: string | null | undefined): bool
 }
 
 export function calcMetrics(orders: Order[], adSpend: AdSpend[], expenses: Expense[]) {
-  // "Penjualan" = Shopee Seller Center definition:
-  //   all orders that were ever paid (including cancelled & returned),
-  //   after subtracting seller-funded vouchers only (not Shopee vouchers).
-  // This is what Shopee shows as "Total Penjualan" in the dashboard header.
+  // ─── GMV & Jumlah Pesanan (Definisi Resmi Shopee) ─────────────────────────
+  // GMV = Total penjualan dari pesanan yang sudah dibayar setelah dikurangi
+  //       Voucher/Diskon dari Penjual.
+  //       TERMASUK pesanan dibatalkan dan dikembalikan.
+  //
+  // Jumlah Pesanan = Semua pesanan yang telah dibayar (termasuk COD),
+  //                 termasuk pesanan yang dibatalkan dan dikembalikan.
+  //
+  // Sumber: https://seller.shopee.co.id/edu/article/26796
+  // ──────────────────────────────────────────────────────────────────────────
   const allPaidOrders = orders.filter(
     (o) => (o.status ?? '').toUpperCase() !== 'UNPAID'
   )
-  const cancelledCount = allPaidOrders.filter((o) =>
-    ['CANCELLED', 'CANCELED', 'RETURNED', 'REFUNDED'].includes((o.status ?? '').toUpperCase())
-  ).length
-  const penjualan = allPaidOrders.reduce(
+
+  // GMV = Sum(total_amount - voucher_from_seller) untuk semua paid orders
+  const gmv = allPaidOrders.reduce(
     (s, o) => s + (o.gmv ?? 0) - (o.voucher_from_seller ?? 0),
     0
   )
 
-  // Active orders: exclude cancelled/returned — used for COGS, revenue, net profit.
-  const completedOrders = orders.filter((o) => orderCountsForShopeeKpi(o.status))
-  const gmv = completedOrders.reduce((s, o) => s + (o.gmv ?? o.revenue), 0)
-  const revenue = completedOrders.reduce((s, o) => s + o.revenue, 0)
-  const sellerDiscount = gmv - revenue
-  const cogs = completedOrders.reduce((s, o) => s + o.cogs, 0)
-  const shippingCost = completedOrders.reduce((s, o) => s + o.shipping_fee, 0)
+  // Jumlah Pesanan = COUNT semua paid orders (include cancelled)
+  const orderCount = allPaidOrders.length
 
-  // Use real escrow fees when available; fall back to estimated platform_fee
-  const commissionFees = completedOrders.reduce((s, o) =>
+  // Pesanan Dibatalkan = COUNT cancelled/returned
+  const cancelledCount = allPaidOrders.filter((o) =>
+    ['CANCELLED', 'CANCELED', 'RETURNED', 'REFUNDED'].includes((o.status ?? '').toUpperCase())
+  ).length
+
+  // ─── Cost & Profit (Hanya Active Orders — Exclude Cancelled) ─────────────
+  // Cancelled orders tidak menimbulkan COGS, shipping, atau platform fees.
+  // ──────────────────────────────────────────────────────────────────────────
+  const activeOrders = orders.filter((o) => orderCountsForShopeeKpi(o.status))
+
+  // buyerPaid = total yang dibayar buyer dari active orders (dasar margin)
+  const buyerPaid = activeOrders.reduce(
+    (s, o) => s + (o.buyer_paid_amount ?? (o.gmv ?? 0) - (o.voucher_from_seller ?? 0)),
+    0
+  )
+
+  const cogs = activeOrders.reduce((s, o) => s + o.cogs, 0)
+  const shippingCost = activeOrders.reduce((s, o) => s + o.shipping_fee, 0)
+
+  // Platform fees: gunakan escrow actuals jika tersedia, fallback ke estimasi
+  const commissionFees = activeOrders.reduce((s, o) =>
     s + (o.escrow_synced ? (o.commission_fee_actual ?? 0) : (o.commission_fee ?? 0)), 0)
-  const serviceFees = completedOrders.reduce((s, o) =>
+  const serviceFees = activeOrders.reduce((s, o) =>
     s + (o.escrow_synced ? (o.service_fee_actual ?? 0) : (o.service_fee ?? 0)), 0)
-  const amsCommission = completedOrders.reduce((s, o) => s + (o.ams_commission ?? 0), 0)
-  const processingFees = completedOrders.reduce((s, o) => s + (o.processing_fee ?? 0), 0)
-  // platformFees: use escrow breakdown when available, else estimated platform_fee
-  const escrowSyncedCount = completedOrders.filter((o) => o.escrow_synced).length
+  const amsCommission = activeOrders.reduce((s, o) => s + (o.ams_commission ?? 0), 0)
+  const processingFees = activeOrders.reduce((s, o) => s + (o.processing_fee ?? 0), 0)
+
+  const escrowSyncedCount = activeOrders.filter((o) => o.escrow_synced).length
   const platformFees = escrowSyncedCount > 0
     ? commissionFees + serviceFees + amsCommission + processingFees
-    : completedOrders.reduce((s, o) => s + o.platform_fee, 0)
+    : activeOrders.reduce((s, o) => s + o.platform_fee, 0)
 
   const shopeeAdsExpenses = expenses
     .filter((e) => e.category === 'Shopee Ads')
@@ -421,16 +440,18 @@ export function calcMetrics(orders: Order[], adSpend: AdSpend[], expenses: Expen
   const otherExpenses = expenses
     .filter((e) => e.category === 'Other')
     .reduce((s, e) => s + e.amount, 0)
-  const netProfit = revenue - cogs - shippingCost - platformFees - adSpendTotal - otherExpenses
-  const margin = revenue > 0 ? (netProfit / revenue) * 100 : 0
+
+  const netProfit = buyerPaid - cogs - shippingCost - platformFees - adSpendTotal - otherExpenses
+  const margin = buyerPaid > 0 ? (netProfit / buyerPaid) * 100 : 0
 
   return {
-    gmv,
-    sellerDiscount,
-    revenue,
-    penjualan,      // Shopee "Total Penjualan": includes cancelled, minus seller voucher
-    cancelledCount, // count of cancelled/returned orders in the period
-    orders: completedOrders.length,
+    // ── Shopee KPI (Match Seller Center) ─────────────────────────────────────
+    gmv,            // Total Penjualan: include cancelled, setelah seller voucher
+    orderCount,     // Jumlah Pesanan: include cancelled
+    cancelledCount, // Pesanan Dibatalkan
+
+    // ── Cost & Profit (Active Orders Only) ───────────────────────────────────
+    buyerPaid,      // Total buyer paid dari active orders (dasar margin)
     cogs,
     shippingCost,
     platformFees,

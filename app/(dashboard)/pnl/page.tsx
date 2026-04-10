@@ -105,10 +105,10 @@ export default function PnlPage() {
         const s = (o.status ?? '').toLowerCase().trim()
         return s === 'returned' || s === 'refunded'
       })
-      .reduce((s, o) => s + (o.revenue ?? 0), 0)
+      .reduce((s, o) => s + (o.buyer_paid_amount ?? o.revenue ?? 0), 0)
     const m = calcMetrics(orders, ads, NO_MANUAL_EXPENSES)
-    const grossRevenue = orders.reduce((s, o) => s + o.revenue, 0)
-    const grossProfit = m.revenue - m.cogs
+    const grossRevenue = m.gmv   // GMV = definisi Shopee (include cancelled, setelah seller voucher)
+    const grossProfit = m.buyerPaid - m.cogs
     return { ...m, grossRevenue, returnedRevenue, grossProfit }
   }, [allOrders, from, to, liveAdSpend])
 
@@ -120,10 +120,10 @@ export default function PnlPage() {
         const s = (o.status ?? '').toLowerCase().trim()
         return s === 'returned' || s === 'refunded'
       })
-      .reduce((s, o) => s + (o.revenue ?? 0), 0)
+      .reduce((s, o) => s + (o.buyer_paid_amount ?? o.revenue ?? 0), 0)
     const m = calcMetrics(orders, ads, NO_MANUAL_EXPENSES)
-    const grossRevenue = orders.reduce((s, o) => s + o.revenue, 0)
-    const grossProfit = m.revenue - m.cogs
+    const grossRevenue = m.gmv
+    const grossProfit = m.buyerPaid - m.cogs
     return { ...m, grossRevenue, returnedRevenue, grossProfit }
   }, [allOrders, prev, liveAdSpend])
 
@@ -133,7 +133,7 @@ export default function PnlPage() {
       ['', 'Current Period', 'Previous Period', '% Change'],
       ['Gross Revenue', currentMetrics.grossRevenue, prevMetrics.grossRevenue, ''],
       ['Returns/Refunds', -currentMetrics.returnedRevenue, -prevMetrics.returnedRevenue, ''],
-      ['Net Revenue', currentMetrics.revenue, prevMetrics.revenue, ''],
+      ['Net Revenue', currentMetrics.buyerPaid, prevMetrics.buyerPaid, ''],
       ['COGS', -currentMetrics.cogs, -prevMetrics.cogs, ''],
       ['Gross Profit', currentMetrics.grossProfit, prevMetrics.grossProfit, ''],
       ['Shipping Costs', -currentMetrics.shippingCost, -prevMetrics.shippingCost, ''],
@@ -173,9 +173,9 @@ export default function PnlPage() {
       <div className="grid sm:grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-6">
-            <p className="text-sm text-muted-foreground">Net Revenue</p>
-            <p className="text-2xl font-bold mt-1">{formatCurrency(currentMetrics.revenue)}</p>
-            <p className="text-xs text-muted-foreground mt-1">{currentMetrics.orders} orders</p>
+            <p className="text-sm text-muted-foreground">Buyer Paid (Active Orders)</p>
+            <p className="text-2xl font-bold mt-1">{formatCurrency(currentMetrics.buyerPaid)}</p>
+            <p className="text-xs text-muted-foreground mt-1">{currentMetrics.orderCount} pesanan (incl. {currentMetrics.cancelledCount} dibatalkan)</p>
           </CardContent>
         </Card>
         <Card>
@@ -183,7 +183,7 @@ export default function PnlPage() {
             <p className="text-sm text-muted-foreground">Gross Profit</p>
             <p className="text-2xl font-bold mt-1">{formatCurrency(currentMetrics.grossProfit)}</p>
             <p className="text-xs text-muted-foreground mt-1">
-              {currentMetrics.revenue > 0 ? ((currentMetrics.grossProfit / currentMetrics.revenue) * 100).toFixed(1) : 0}% gross margin
+              {currentMetrics.buyerPaid > 0 ? ((currentMetrics.grossProfit / currentMetrics.buyerPaid) * 100).toFixed(1) : 0}% gross margin
             </p>
           </CardContent>
         </Card>
@@ -194,7 +194,7 @@ export default function PnlPage() {
               {formatCurrency(currentMetrics.netProfit)}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              {currentMetrics.revenue > 0 ? currentMetrics.margin.toFixed(1) : 0}% net margin
+              {currentMetrics.buyerPaid > 0 ? currentMetrics.margin.toFixed(1) : 0}% net margin
             </p>
           </CardContent>
         </Card>
@@ -220,7 +220,7 @@ export default function PnlPage() {
                 <SectionHeader label="Revenue" />
                 <PnlRow label="Gross Revenue" current={currentMetrics.grossRevenue} previous={prevMetrics.grossRevenue} />
                 <PnlRow label="Returns & Refunds" current={currentMetrics.returnedRevenue} previous={prevMetrics.returnedRevenue} isDeduction indent />
-                <PnlRow label="Net Revenue" current={currentMetrics.revenue} previous={prevMetrics.revenue} isSubtotal />
+                <PnlRow label="Buyer Paid (Active Orders)" current={currentMetrics.buyerPaid} previous={prevMetrics.buyerPaid} isSubtotal />
 
                 <SectionHeader label="Cost of Goods" />
                 <PnlRow label="COGS" current={currentMetrics.cogs} previous={prevMetrics.cogs} isDeduction indent />

@@ -243,7 +243,7 @@ export async function getOrderList(
 
   for (;;) {
     const params: Record<string, string | number> = {
-      time_range_field: 'pay_time',
+      time_range_field: 'create_time',
       time_from: fromTs,
       time_to: toTs,
       page_size: 100,

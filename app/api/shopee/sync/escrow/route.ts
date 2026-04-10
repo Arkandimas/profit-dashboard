@@ -73,73 +73,55 @@ export async function POST() {
       return res
     }
 
-    // ── Fetch escrow for the batch concurrently ───────────────────────────────
-    const escrowResults = await Promise.all(
-      orders.map(async (order) => {
-        try {
-          const escrow = await getEscrowDetail(order.order_id, accessToken!, shopId)
-          return { order, escrow, fetchError: null }
-        } catch (err) {
-          return { order, escrow: null, fetchError: err instanceof Error ? err.message : 'Unknown error' }
-        }
-      })
-    )
+    // ── Fetch escrow and update DB sequentially with 150ms delay ─────────────
+    // Sequential to avoid concurrent timeout failures from Shopee rate limits.
+    let synced = 0
+    for (const order of orders) {
+      let escrow = null
+      try {
+        escrow = await getEscrowDetail(order.order_id, accessToken!, shopId, 15_000)
+      } catch {
+        // Per-order failure: skip and continue
+        await new Promise<void>((r) => setTimeout(r, 150))
+        continue
+      }
 
-    // ── Update DB for each order concurrently ─────────────────────────────────
-    const updateFlags = await Promise.all(
-      escrowResults.map(async ({ order, escrow, fetchError }) => {
-        if (fetchError || !escrow) {
-          return false
-        }
+      const inc = escrow.order_income ?? {}
+      const commission_fee_actual  = Number(inc.commission_fee ?? 0)
+      const service_fee_actual     = Number(inc.service_fee ?? 0)
+      const ams_commission         = Number(inc.order_ams_commission_fee ?? 0)
+      const processing_fee         = Number(inc.seller_order_processing_fee ?? 0)
+      const shopee_shipping_rebate = Number(inc.shopee_shipping_rebate ?? 0)
+      const voucher_from_seller    = Number(inc.voucher_from_seller ?? 0)
+      const voucher_from_shopee    = Number(inc.voucher_from_shopee ?? 0)
+      const escrow_amount          = Number(inc.escrow_amount ?? 0)
+      const buyer_paid_amount      = Number(inc.buyer_paid_amount ?? 0)
+      const voucher_amount         = voucher_from_seller + voucher_from_shopee
 
-        const inc = escrow.order_income ?? {}
-        const commission_fee_actual  = Number(inc.commission_fee ?? 0)
-        const service_fee_actual     = Number(inc.service_fee ?? 0)
-        const ams_commission         = Number(inc.order_ams_commission_fee ?? 0)
-        const processing_fee         = Number(inc.seller_order_processing_fee ?? 0)
-        const shopee_shipping_rebate = Number(inc.shopee_shipping_rebate ?? 0)
-        const voucher_from_seller    = Number(inc.voucher_from_seller ?? 0)
-        const voucher_from_shopee    = Number(inc.voucher_from_shopee ?? 0)
-        const escrow_amount          = Number(inc.escrow_amount ?? 0)
-        const buyer_paid_amount      = Number(inc.buyer_paid_amount ?? 0)
-        const voucher_amount         = voucher_from_seller + voucher_from_shopee
+      const net_profit = escrow_amount - (order.cogs ?? 0)
 
-        const net_profit =
-          order.revenue
-          - order.cogs
-          - commission_fee_actual
-          - service_fee_actual
-          - ams_commission
-          - processing_fee
-          - voucher_from_seller
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({
+          buyer_paid_amount,
+          voucher_amount,
+          escrow_amount,
+          commission_fee_actual,
+          service_fee_actual,
+          ams_commission,
+          processing_fee,
+          shopee_shipping_rebate,
+          voucher_from_seller,
+          voucher_from_shopee,
+          net_profit,
+          escrow_synced: true,
+          escrow_synced_at: new Date().toISOString(),
+        })
+        .eq('order_id', order.order_id)
 
-        const { error: updateError } = await supabase
-          .from('orders')
-          .update({
-            buyer_paid_amount,
-            voucher_amount,
-            escrow_amount,
-            commission_fee_actual,
-            service_fee_actual,
-            ams_commission,
-            processing_fee,
-            shopee_shipping_rebate,
-            voucher_from_seller,
-            voucher_from_shopee,
-            net_profit,
-            escrow_synced: true,
-            escrow_synced_at: new Date().toISOString(),
-          })
-          .eq('order_id', order.order_id)
-
-        if (updateError) {
-          return false
-        }
-        return true
-      })
-    )
-
-    const synced = updateFlags.filter(Boolean).length
+      if (!updateError) synced++
+      await new Promise<void>((r) => setTimeout(r, 150))
+    }
 
     // Count how many eligible orders still need escrow
     const { count: remaining } = await supabase

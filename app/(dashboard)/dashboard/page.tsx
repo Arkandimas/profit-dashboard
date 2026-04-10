@@ -50,7 +50,7 @@ function reportTimeMs(o: Order): number {
   return safeDate(o.paid_at || o.created_at)?.getTime() ?? 0
 }
 
-const CHART_METRICS = ['GMV', 'Revenue', 'Orders'] as const
+const CHART_METRICS = ['GMV', 'Orders'] as const
 type ChartMetric = (typeof CHART_METRICS)[number]
 
 const PIE_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6']
@@ -245,33 +245,26 @@ export default function DashboardPage() {
       const dayOrders = filterOrdersByReportDate(filteredOrders, dayStart, dayEnd)
       const dayAds = filterByDateRange(filteredAdSpend, dayStart, dayEnd)
       const m = calcMetrics(dayOrders, dayAds, NO_MANUAL_EXPENSES)
-      const gmv = dayOrders.reduce((s, o) => s + (Number(o.gmv) || 0), 0)
       return {
         date: label,
-        GMV: Math.round(gmv / 1000),
-        Revenue: Math.round(m.revenue / 1000),
-        Orders: m.orders,
+        GMV: Math.round(m.gmv / 1000),
+        Orders: m.orderCount,
       }
     })
   }, [filteredOrders, filteredAdSpend, from, to])
 
-  const gmvTotal = useMemo(
-    () => filteredOrders.reduce((s, o) => s + (Number(o.gmv) || 0), 0),
-    [filteredOrders]
-  )
+  // GMV sesuai definisi Shopee: include cancelled, setelah seller voucher
+  const gmvTotal = metrics.gmv
 
-  const cancelledOrders = useMemo(
-    () =>
-      filteredOrders.filter((o) => ['cancelled', 'canceled', 'in_cancel'].includes((o.status ?? '').toLowerCase().trim())).length,
-    [filteredOrders]
-  )
+  // Pesanan dari metrics (sudah sesuai definisi Shopee: include cancelled)
+  const totalOrders = metrics.orderCount
+  const cancelledOrders = metrics.cancelledCount
+  const activeOrders = totalOrders - cancelledOrders
 
-  const paidOrders = metrics.orders
   const conversionHint = useMemo(() => {
-    const denom = paidOrders + cancelledOrders
-    if (denom <= 0) return '—'
-    return `${((paidOrders / denom) * 100).toFixed(1)}% paid rate`
-  }, [paidOrders, cancelledOrders])
+    if (totalOrders <= 0) return '—'
+    return `${((activeOrders / totalOrders) * 100).toFixed(1)}% paid rate`
+  }, [totalOrders, activeOrders])
 
   // Escrow-aware fee breakdown — uses real values when escrow_synced = true
   const escrowSyncedCount = useMemo(
@@ -296,8 +289,8 @@ export default function DashboardPage() {
     [commissionTotal, serviceFeeTotal, amsTotal, processingTotal]
   )
 
-  // Net Revenue: use sum of escrow_amount when available (most accurate),
-  // fall back to revenue - platformFees for unsynced orders.
+  // Escrow (Net Revenue): sum escrow_amount jika tersedia (paling akurat),
+  // fallback ke buyerPaid - platformFees untuk order yang belum escrow sync.
   const escrowAmountTotal = useMemo(
     () => filteredOrders
       .filter((o) => orderCountsForShopeeKpi(o.status) && o.escrow_synced)
@@ -306,33 +299,32 @@ export default function DashboardPage() {
   )
   const netRevenue = useMemo(() => {
     if (escrowSyncedCount > 0) return escrowAmountTotal
-    return metrics.revenue - platformFees
-  }, [escrowSyncedCount, escrowAmountTotal, metrics.revenue, platformFees])
+    return metrics.buyerPaid - platformFees
+  }, [escrowSyncedCount, escrowAmountTotal, metrics.buyerPaid, platformFees])
 
   const netProfit = useMemo(() => netRevenue - metrics.cogs - metrics.adSpendTotal, [netRevenue, metrics.cogs, metrics.adSpendTotal])
 
-  // Waterfall breakdown: GMV → Diskon → Revenue → Komisi → Serv.Fee → AMS → Proc.Fee → COGS → Profit
+  // Waterfall: GMV (Penjualan) → Komisi → Serv.Fee → AMS → Proc.Fee → COGS → Profit
+  // GMV sudah include cancelled, minus seller voucher (definisi Shopee).
+  // Biaya platform & COGS hanya dari active orders.
   const waterfallData = useMemo(() => {
-    const rev = metrics.revenue
+    const bp = metrics.buyerPaid  // dasar biaya platform & profit
     const cg = metrics.cogs
     const commission = commissionTotal
     const svc = serviceFeeTotal
     const ams = amsTotal
     const proc = processingTotal
-    const discount = Math.max(0, gmvTotal - rev)
-    const profit = rev - commission - svc - ams - proc - cg
+    const profit = bp - commission - svc - ams - proc - cg
     return [
-      { name: 'GMV',      base: 0,                                                       value: gmvTotal,         fill: '#6366f1' },
-      { name: 'Diskon',   base: rev,                                                      value: discount,         fill: '#f59e0b' },
-      { name: 'Revenue',  base: 0,                                                        value: rev,              fill: '#3b82f6' },
-      { name: 'Komisi',   base: Math.max(0, rev - commission),                            value: commission,       fill: '#ef4444' },
-      { name: 'Serv.Fee', base: Math.max(0, rev - commission - svc),                     value: svc,              fill: '#ef4444' },
-      { name: 'AMS',      base: Math.max(0, rev - commission - svc - ams),               value: ams,              fill: '#f97316' },
-      { name: 'Proc.Fee', base: Math.max(0, rev - commission - svc - ams - proc),        value: proc,             fill: '#ef4444' },
-      { name: 'COGS',     base: Math.max(0, rev - commission - svc - ams - proc - cg),  value: cg,               fill: '#ef4444' },
-      { name: 'Profit',   base: 0,                                                        value: Math.abs(profit), fill: profit >= 0 ? '#10b981' : '#ef4444' },
+      { name: 'GMV',      base: 0,                                                      value: gmvTotal,         fill: '#6366f1' },
+      { name: 'Komisi',   base: Math.max(0, bp - commission),                           value: commission,       fill: '#ef4444' },
+      { name: 'Serv.Fee', base: Math.max(0, bp - commission - svc),                    value: svc,              fill: '#ef4444' },
+      { name: 'AMS',      base: Math.max(0, bp - commission - svc - ams),              value: ams,              fill: '#f97316' },
+      { name: 'Proc.Fee', base: Math.max(0, bp - commission - svc - ams - proc),       value: proc,             fill: '#ef4444' },
+      { name: 'COGS',     base: Math.max(0, bp - commission - svc - ams - proc - cg), value: cg,               fill: '#ef4444' },
+      { name: 'Profit',   base: 0,                                                      value: Math.abs(profit), fill: profit >= 0 ? '#10b981' : '#ef4444' },
     ]
-  }, [gmvTotal, metrics.revenue, metrics.cogs, commissionTotal, serviceFeeTotal, amsTotal, processingTotal])
+  }, [gmvTotal, metrics.buyerPaid, metrics.cogs, commissionTotal, serviceFeeTotal, amsTotal, processingTotal])
 
   // Pie data — Shopee Ads shown as separate slice from general Ad Spend
   const pieData = [
@@ -464,33 +456,36 @@ export default function DashboardPage() {
           <KpiCard
             title="GMV"
             value={formatCurrency(gmvTotal)}
-            icon={<Tag className="w-4 h-4" />}
-            tooltip="Total harga item sebelum voucher/diskon apapun. Termasuk pesanan dibatalkan."
-          />
-          <KpiCard
-            title="Penjualan (Shopee)"
-            value={formatCurrency(metrics.penjualan)}
+            change={pctChange(metrics.gmv, prevMetrics.gmv)}
             icon={<DollarSign className="w-4 h-4" />}
-            tooltip="Definisi Shopee Seller Center: GMV dikurangi voucher dari penjual saja. Termasuk pesanan dibatalkan & dikembalikan."
+            tooltip="Total Penjualan dari pesanan yang sudah dibayar setelah dikurangi Voucher/Diskon dari Penjual. Termasuk pesanan dibatalkan & dikembalikan. (Definisi resmi Shopee)"
             colorScheme="orange"
           />
           <KpiCard
             title="Pesanan Dibayar"
-            value={paidOrders.toLocaleString()}
+            value={totalOrders.toLocaleString()}
+            change={pctChange(metrics.orderCount, prevMetrics.orderCount)}
             icon={<ShoppingCart className="w-4 h-4" />}
-            tooltip="Jumlah order yang sudah dikonfirmasi pembayarannya. Tidak termasuk UNPAID, CANCELLED, dan RETURNED."
+            tooltip="Jumlah pesanan yang telah dibayar (termasuk COD), termasuk pesanan yang dibatalkan dan dikembalikan. (Definisi resmi Shopee)"
           />
           <KpiCard
             title="Pesanan Dibatalkan"
             value={cancelledOrders.toLocaleString()}
+            change={pctChange(metrics.cancelledCount, prevMetrics.cancelledCount)}
             icon={<Package className="w-4 h-4" />}
-            tooltip="Order yang dibatalkan atau dikembalikan dalam periode ini. Shopee menghitung ini dalam 'Total Penjualan'."
+            tooltip="Pesanan yang dibatalkan atau dikembalikan. Sudah termasuk dalam GMV per definisi Shopee."
           />
           <KpiCard
-            title="Conversion"
+            title="Order Aktif"
+            value={activeOrders.toLocaleString()}
+            icon={<ShoppingCart className="w-4 h-4" />}
+            tooltip="Pesanan Dibayar dikurangi Pesanan Dibatalkan. Digunakan untuk perhitungan COGS dan profit."
+          />
+          <KpiCard
+            title="Paid Rate"
             value={conversionHint}
             icon={<Percent className="w-4 h-4" />}
-            tooltip="Paid rate = Pesanan Dibayar / (Pesanan Dibayar + Dibatalkan)."
+            tooltip="Order Aktif / Total Pesanan Dibayar. Menunjukkan persentase pesanan yang tidak dibatalkan."
           />
         </div>
 
@@ -522,10 +517,8 @@ export default function DashboardPage() {
         <Card>
           <CardContent className="p-4 text-sm text-muted-foreground">
             <span className="font-medium text-foreground">GMV</span> {formatCurrency(gmvTotal)} →
-            <span className="ml-2">-Voucher</span> {formatCurrency(filteredOrders.reduce((s, o) => s + (Number(o.voucher_amount) || 0), 0))} →
-            <span className="ml-2 font-medium text-foreground">Revenue</span> {formatCurrency(metrics.revenue)} →
             <span className="ml-2">-Fees</span> {formatCurrency(platformFees)} →
-            <span className="ml-2">Escrow</span> {formatCurrency(filteredOrders.reduce((s, o) => s + (Number(o.escrow_amount) || 0), 0))} →
+            <span className="ml-2 font-medium text-foreground">Escrow</span> {formatCurrency(filteredOrders.reduce((s, o) => s + (Number(o.escrow_amount) || 0), 0))} →
             <span className="ml-2">-COGS</span> {formatCurrency(metrics.cogs)} →
             <span className="ml-2 font-medium text-foreground">Net Profit</span> {formatCurrency(netProfit)}
           </CardContent>
@@ -533,7 +526,7 @@ export default function DashboardPage() {
       </div>
 
       {/* COGS warning banner */}
-      {liveOrders !== null && metrics.cogs === 0 && metrics.orders > 0 && (
+      {liveOrders !== null && metrics.cogs === 0 && metrics.orderCount > 0 && (
         <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-2">
           <span>⚠️</span>
           <span>COGS belum diset — net profit ditampilkan tanpa biaya produksi. Set COGS di halaman <a href="/products" className="underline">Produk</a>.</span>
@@ -690,7 +683,8 @@ export default function DashboardPage() {
               </thead>
               <tbody>
                 {recentOrders.map((order) => {
-                  const netProfit = order.revenue - order.cogs - order.shipping_fee - order.platform_fee
+                  const buyerPaid = order.buyer_paid_amount ?? order.revenue ?? 0
+                  const netProfit = buyerPaid - order.cogs - order.shipping_fee - order.platform_fee
                   return (
                     <tr key={order.id} className="border-b last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/30">
                       <td className="px-4 py-3 font-mono text-xs">{order.order_id}</td>
@@ -706,7 +700,7 @@ export default function DashboardPage() {
                           {order.platform}
                         </Badge>
                       </td>
-                      <td className="px-4 py-3 text-right">{formatCurrency(order.revenue)}</td>
+                      <td className="px-4 py-3 text-right">{formatCurrency(order.buyer_paid_amount ?? order.revenue ?? 0)}</td>
                       <td className="px-4 py-3 text-right text-muted-foreground">{formatCurrency(order.cogs)}</td>
                       <td className={`px-4 py-3 text-right font-medium ${netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {formatCurrency(netProfit)}
