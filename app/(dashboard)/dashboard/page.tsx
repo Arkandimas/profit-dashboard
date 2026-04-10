@@ -611,7 +611,6 @@ export default function DashboardPage() {
                   <YAxis tick={{ fontSize: 11 }} tickLine={false} tickFormatter={(v) => `${v}K`} />
                   <Tooltip formatter={(value) => formatCurrency(Number(value) * 1000)} />
                   <Line type="monotone" dataKey="GMV" stroke="#10b981" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="Revenue" stroke="#3b82f6" strokeWidth={2} dot={false} />
                 </LineChart>
               )}
             </ResponsiveContainer>
@@ -674,7 +673,7 @@ export default function DashboardPage() {
                 <tr className="border-b bg-slate-50 dark:bg-slate-800/50">
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">Order ID</th>
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">Platform</th>
-                  <th className="text-right px-4 py-3 font-medium text-muted-foreground">Revenue</th>
+                  <th className="text-right px-4 py-3 font-medium text-muted-foreground">Buyer Paid</th>
                   <th className="text-right px-4 py-3 font-medium text-muted-foreground">COGS</th>
                   <th className="text-right px-4 py-3 font-medium text-muted-foreground">Net Profit</th>
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">Date (paid)</th>
