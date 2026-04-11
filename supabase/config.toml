@@ -1,2 +1,6 @@
 [functions.scheduled-sync]
+verify_jwt = false
+
+[cron_jobs.shopee-scheduled-sync]
 schedule = "0 */6 * * *"
+function = "scheduled-sync"
