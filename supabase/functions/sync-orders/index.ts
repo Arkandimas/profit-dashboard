@@ -345,11 +345,23 @@ Deno.serve(async (req) => {
       if (upsertErr) throw new Error(`Stub upsert failed: ${upsertErr.message}`)
     }
 
+    // Only fetch details for orders that haven't been detailed yet
+    const allSns = allSummaries.map((o) => o.order_sn)
+    const { data: alreadyDetailed } = await supabase
+      .from('orders')
+      .select('order_id')
+      .in('order_id', allSns)
+      .eq('details_synced', true)
+    const detailedSet = new Set((alreadyDetailed ?? []).map((r: { order_id: string }) => r.order_id))
+    const needsDetail = allSummaries.filter((o) => !detailedSet.has(o.order_sn))
+
+    console.log(`sync-orders: ${allSummaries.length} total, ${needsDetail.length} need details`)
+
     // Fetch details in batches of 50
     const DETAIL_BATCH = 50
     let detailsSynced = 0
-    for (let i = 0; i < allSummaries.length; i += DETAIL_BATCH) {
-      const batch = allSummaries.slice(i, i + DETAIL_BATCH)
+    for (let i = 0; i < needsDetail.length; i += DETAIL_BATCH) {
+      const batch = needsDetail.slice(i, i + DETAIL_BATCH)
       const sns = batch.map((o) => o.order_sn)
       const details = await getOrderDetail(partnerId, partnerKey, sns, accessToken, shopId)
 
