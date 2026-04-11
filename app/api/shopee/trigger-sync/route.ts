@@ -14,7 +14,19 @@ import { createClient } from '@supabase/supabase-js'
  */
 export async function POST(request: Request) {
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
-  const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+  // Validate required env vars immediately so the error is obvious
+  if (!supabaseUrl) {
+    console.error('[trigger-sync] Missing env: SUPABASE_URL / NEXT_PUBLIC_SUPABASE_URL')
+    return NextResponse.json({ error: 'Server misconfiguration: SUPABASE_URL not set' }, { status: 500 })
+  }
+  if (!serviceRoleKey) {
+    console.error('[trigger-sync] Missing env: SUPABASE_SERVICE_ROLE_KEY')
+    return NextResponse.json({ error: 'Server misconfiguration: SUPABASE_SERVICE_ROLE_KEY not set' }, { status: 500 })
+  }
+
+  const supabase = createClient(supabaseUrl, serviceRoleKey)
   const supabaseFunctionsUrl = supabaseUrl
 
   try {
@@ -48,8 +60,9 @@ export async function POST(request: Request) {
     )
 
     if (upsertErr) {
+      console.error('[trigger-sync] Failed to upsert shopee_tokens:', upsertErr)
       return NextResponse.json(
-        { error: `Failed to save tokens: ${upsertErr.message}` },
+        { error: `Failed to save tokens: ${upsertErr.message}`, detail: upsertErr },
         { status: 500 }
       )
     }
@@ -57,7 +70,7 @@ export async function POST(request: Request) {
     // Fire Edge Functions after response is sent (fire-and-forget)
     const edgeFnHeaders = {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+      Authorization: `Bearer ${serviceRoleKey}`,
     }
 
     after(async () => {
@@ -68,22 +81,29 @@ export async function POST(request: Request) {
           headers: edgeFnHeaders,
           body: JSON.stringify({ days, shop_id: shopId }),
         })
-        if (!ordersRes.ok) return
+        if (!ordersRes.ok) {
+          console.error('[trigger-sync] sync-orders failed:', ordersRes.status, await ordersRes.text())
+          return
+        }
 
         // Then sync escrow
-        await fetch(`${supabaseFunctionsUrl}/functions/v1/sync-escrow`, {
+        const escrowRes = await fetch(`${supabaseFunctionsUrl}/functions/v1/sync-escrow`, {
           method: 'POST',
           headers: edgeFnHeaders,
           body: JSON.stringify({ shop_id: shopId }),
         })
-      } catch {
-        // Errors are logged by the Edge Functions themselves into sync_logs
+        if (!escrowRes.ok) {
+          console.error('[trigger-sync] sync-escrow failed:', escrowRes.status, await escrowRes.text())
+        }
+      } catch (err) {
+        console.error('[trigger-sync] after() error:', err)
       }
     })
 
     return NextResponse.json({ triggered: true, days, shop_id: shopId })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
+    console.error('[trigger-sync] Unexpected error:', err)
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
