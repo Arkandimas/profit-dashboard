@@ -3,10 +3,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 const PARTNER_ID = parseInt(Deno.env.get('SHOPEE_PARTNER_ID') ?? '0')
 const PARTNER_KEY = Deno.env.get('SHOPEE_PARTNER_KEY') ?? ''
 const BASE_URL = 'https://partner.shopeemobile.com'
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 // ─── Crypto ───────────────────────────────────────────────────────────────────
 
@@ -56,8 +52,10 @@ interface TokenRow {
   expires_at: string
 }
 
-async function loadTokens(shopId: number): Promise<TokenRow | null> {
-  const { data } = await supabase
+type SupabaseClient = ReturnType<typeof createClient>
+
+async function loadTokens(sb: SupabaseClient, shopId: number): Promise<TokenRow | null> {
+  const { data } = await sb
     .from('shopee_tokens')
     .select('*')
     .eq('shop_id', shopId)
@@ -65,15 +63,15 @@ async function loadTokens(shopId: number): Promise<TokenRow | null> {
   return data ?? null
 }
 
-async function saveTokens(shopId: number, accessToken: string, refreshToken: string, expiresIn: number) {
+async function saveTokens(sb: SupabaseClient, shopId: number, accessToken: string, refreshToken: string, expiresIn: number) {
   const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString()
-  await supabase.from('shopee_tokens').upsert(
+  await sb.from('shopee_tokens').upsert(
     { shop_id: shopId, access_token: accessToken, refresh_token: refreshToken, expires_at: expiresAt },
     { onConflict: 'shop_id' }
   )
 }
 
-async function refreshToken(row: TokenRow): Promise<TokenRow> {
+async function refreshAccessToken(sb: SupabaseClient, row: TokenRow): Promise<TokenRow> {
   const path = '/api/v2/auth/access_token/get'
   const ts = Math.floor(Date.now() / 1000)
   const sig = await sign(path, ts)
@@ -95,18 +93,18 @@ async function refreshToken(row: TokenRow): Promise<TokenRow> {
   const data = await res.json()
   if (data.error && data.error !== '') throw new Error(`Token refresh: ${data.message ?? data.error}`)
 
-  await saveTokens(row.shop_id, data.access_token, data.refresh_token, data.expire_in ?? 14400)
+  await saveTokens(sb, row.shop_id, data.access_token, data.refresh_token, data.expire_in ?? 14400)
   return { ...row, access_token: data.access_token, refresh_token: data.refresh_token }
 }
 
-async function getValidToken(shopId: number): Promise<TokenRow> {
-  const row = await loadTokens(shopId)
+async function getValidToken(sb: SupabaseClient, shopId: number): Promise<TokenRow> {
+  const row = await loadTokens(sb, shopId)
   if (!row) throw new Error('No Shopee tokens found. Reconnect in Settings.')
 
   const expiresAt = new Date(row.expires_at).getTime()
   const twoMinutes = 2 * 60 * 1000
   if (Date.now() + twoMinutes >= expiresAt) {
-    return refreshToken(row)
+    return refreshAccessToken(sb, row)
   }
   return row
 }
@@ -265,6 +263,30 @@ Deno.serve(async (req) => {
     })
   }
 
+  // Validate env vars and init supabase client inside handler so errors are catchable
+  console.log('sync-orders started, checking env vars...')
+  console.log('SHOPEE_PARTNER_ID:', Deno.env.get('SHOPEE_PARTNER_ID') ? 'SET' : 'MISSING')
+  console.log('SHOPEE_PARTNER_KEY:', Deno.env.get('SHOPEE_PARTNER_KEY') ? 'SET' : 'MISSING')
+  console.log('SHOPEE_SHOP_ID:', Deno.env.get('SHOPEE_SHOP_ID') ? 'SET' : 'MISSING')
+  console.log('SUPABASE_URL:', Deno.env.get('SUPABASE_URL') ? 'SET' : 'MISSING')
+  console.log('SUPABASE_SERVICE_ROLE_KEY:', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ? 'SET' : 'MISSING')
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    const missing = [!supabaseUrl && 'SUPABASE_URL', !serviceRoleKey && 'SUPABASE_SERVICE_ROLE_KEY'].filter(Boolean).join(', ')
+    console.error('FATAL: missing env vars:', missing)
+    return Response.json({ error: `Missing env vars: ${missing}` }, { status: 500 })
+  }
+
+  if (!PARTNER_ID || !PARTNER_KEY) {
+    const missing = [!PARTNER_ID && 'SHOPEE_PARTNER_ID', !PARTNER_KEY && 'SHOPEE_PARTNER_KEY'].filter(Boolean).join(', ')
+    console.error('FATAL: missing Shopee env vars:', missing)
+    return Response.json({ error: `Missing env vars: ${missing}` }, { status: 500 })
+  }
+
+  const supabase = createClient(supabaseUrl, serviceRoleKey)
   const startMs = Date.now()
 
   try {
@@ -276,7 +298,9 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'shop_id required' }, { status: 400 })
     }
 
-    const tokenRow = await getValidToken(shopId)
+    console.log(`sync-orders: shopId=${shopId}, days=${days}`)
+
+    const tokenRow = await getValidToken(supabase, shopId)
     const { access_token: accessToken } = tokenRow
 
     const nowTs = Math.floor(Date.now() / 1000)
@@ -330,14 +354,16 @@ Deno.serve(async (req) => {
 
     return Response.json({ synced: detailsSynced, duration_ms: durationMs })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    await supabase.from('sync_logs').insert({
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('sync-orders FATAL ERROR:', err)
+    const { error: logErr } = await supabase.from('sync_logs').insert({
       sync_type: 'orders',
       status: 'error',
       synced_count: 0,
       duration_ms: Date.now() - startMs,
       metadata: { error: message },
     })
+    if (logErr) console.error('sync-orders: failed to write sync_logs:', logErr)
     return Response.json({ error: message }, { status: 500 })
   }
 })
