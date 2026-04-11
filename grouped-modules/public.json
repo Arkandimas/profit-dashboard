@@ -1,0 +1,27 @@
+[
+  {
+    "name": "get_access_token",
+    "url": "https://open.shopee.com/documents/v2/v2.public.get_access_token?module=104&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_merchants_by_partner",
+    "url": "https://open.shopee.com/documents/v2/v2.public.get_merchants_by_partner?module=104&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_shopee_ip_ranges",
+    "url": "https://open.shopee.com/documents/v2/v2.public.get_shopee_ip_ranges?module=104&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_shops_by_partner",
+    "url": "https://open.shopee.com/documents/v2/v2.public.get_shops_by_partner?module=104&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_token_by_resend_code",
+    "url": "https://open.shopee.com/documents/v2/v2.public.get_token_by_resend_code?module=104&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  }
+]

@@ -1,0 +1,42 @@
+[
+  {
+    "name": "add_shop_flash_sale_items",
+    "url": "https://open.shopee.com/documents/v2/v2.shop_flash_sale.add_shop_flash_sale_items?module=123&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_item_criteria",
+    "url": "https://open.shopee.com/documents/v2/v2.shop_flash_sale.get_item_criteria?module=123&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_shop_flash_sale",
+    "url": "https://open.shopee.com/documents/v2/v2.shop_flash_sale.get_shop_flash_sale?module=123&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_shop_flash_sale_items",
+    "url": "https://open.shopee.com/documents/v2/v2.shop_flash_sale.get_shop_flash_sale_items?module=123&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_shop_flash_sale_list",
+    "url": "https://open.shopee.com/documents/v2/v2.shop_flash_sale.get_shop_flash_sale_list?module=123&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_time_slot_id",
+    "url": "https://open.shopee.com/documents/v2/v2.shop_flash_sale.get_time_slot_id?module=123&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "update_shop_flash_sale",
+    "url": "https://open.shopee.com/documents/v2/v2.shop_flash_sale.update_shop_flash_sale?module=123&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "update_shop_flash_sale_items",
+    "url": "https://open.shopee.com/documents/v2/v2.shop_flash_sale.update_shop_flash_sale_items?module=123&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  }
+]

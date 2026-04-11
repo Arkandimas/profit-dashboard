@@ -1,0 +1,67 @@
+[
+  {
+    "name": "edit_video_info",
+    "url": "https://open.shopee.com/documents/v2/v2.video.edit_video_info?module=129&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_cover_list",
+    "url": "https://open.shopee.com/documents/v2/v2.video.get_cover_list?module=129&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_metric_trend",
+    "url": "https://open.shopee.com/documents/v2/v2.video.get_metric_trend?module=129&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_overview_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.video.get_overview_performance?module=129&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_prodcut_performance_list",
+    "url": "https://open.shopee.com/documents/v2/v2.video.get_prodcut_performance_list?module=129&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_user_demographics",
+    "url": "https://open.shopee.com/documents/v2/v2.video.get_user_demographics?module=129&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_video_detail",
+    "url": "https://open.shopee.com/documents/v2/v2.video.get_video_detail?module=129&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_video_detail_audience_distribution",
+    "url": "https://open.shopee.com/documents/v2/v2.video.get_video_detail_audience_distribution?module=129&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_video_detail_metric_trend",
+    "url": "https://open.shopee.com/documents/v2/v2.video.get_video_detail_metric_trend?module=129&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_video_detail_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.video.get_video_detail_performance?module=129&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_video_detail_product_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.video.get_video_detail_product_performance?module=129&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_video_list",
+    "url": "https://open.shopee.com/documents/v2/v2.video.get_video_list?module=129&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_video_performance_list",
+    "url": "https://open.shopee.com/documents/v2/v2.video.get_video_performance_list?module=129&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  }
+]

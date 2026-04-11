@@ -1,0 +1,12 @@
+[
+  {
+    "name": "get_app_push_config",
+    "url": "https://open.shopee.com/documents/v2/v2.push.get_app_push_config?module=105&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_lost_push_message",
+    "url": "https://open.shopee.com/documents/v2/v2.push.get_lost_push_message?module=105&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  }
+]

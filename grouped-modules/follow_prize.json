@@ -1,0 +1,22 @@
+[
+  {
+    "name": "add_follow_prize",
+    "url": "https://open.shopee.com/documents/v2/v2.follow_prize.add_follow_prize?module=113&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_follow_prize_detail",
+    "url": "https://open.shopee.com/documents/v2/v2.follow_prize.get_follow_prize_detail?module=113&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_follow_prize_list",
+    "url": "https://open.shopee.com/documents/v2/v2.follow_prize.get_follow_prize_list?module=113&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "update_follow_prize",
+    "url": "https://open.shopee.com/documents/v2/v2.follow_prize.update_follow_prize?module=113&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  }
+]

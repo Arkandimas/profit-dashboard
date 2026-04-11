@@ -1,0 +1,17 @@
+[
+  {
+    "name": "add_top_picks",
+    "url": "https://open.shopee.com/documents/v2/v2.top_picks.add_top_picks?module=100&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_top_picks_list",
+    "url": "https://open.shopee.com/documents/v2/v2.top_picks.get_top_picks_list?module=100&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "update_top_picks",
+    "url": "https://open.shopee.com/documents/v2/v2.top_picks.update_top_picks?module=100&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  }
+]

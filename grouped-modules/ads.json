@@ -1,0 +1,92 @@
+[
+  {
+    "name": "edit_gms_item_product_campaign",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.edit_gms_item_product_campaign?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "edit_gms_product_campaign",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.edit_gms_product_campaign?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "edit_manual_product_ad_keywords",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.edit_manual_product_ad_keywords?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "edit_manual_product_ads",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.edit_manual_product_ads?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_all_cpc_ads_daily_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.get_all_cpc_ads_daily_performance?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_all_cpc_ads_hourly_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.get_all_cpc_ads_hourly_performance?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_create_product_ad_budget_suggestion",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.get_create_product_ad_budget_suggestion?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_gms_campaign_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.get_gms_campaign_performance?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_gms_item_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.get_gms_item_performance?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_product_campaign_daily_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.get_product_campaign_daily_performance?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_product_campaign_hourly_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.get_product_campaign_hourly_performance?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_product_level_campaign_id_list",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.get_product_level_campaign_id_list?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_product_level_campaign_setting_info",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.get_product_level_campaign_setting_info?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_product_recommended_roi_target",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.get_product_recommended_roi_target?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_recommended_item_list",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.get_recommended_item_list?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_recommended_keyword_list",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.get_recommended_keyword_list?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_shop_toggle_info",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.get_shop_toggle_info?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_total_balance",
+    "url": "https://open.shopee.com/documents/v2/v2.ads.get_total_balance?module=117&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  }
+]

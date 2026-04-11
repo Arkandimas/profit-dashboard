@@ -1,0 +1,37 @@
+[
+  {
+    "name": "add_bundle_deal",
+    "url": "https://open.shopee.com/documents/v2/v2.bundle_deal.add_bundle_deal?module=110&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "add_bundle_deal_item",
+    "url": "https://open.shopee.com/documents/v2/v2.bundle_deal.add_bundle_deal_item?module=110&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_bundle_deal",
+    "url": "https://open.shopee.com/documents/v2/v2.bundle_deal.get_bundle_deal?module=110&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_bundle_deal_item",
+    "url": "https://open.shopee.com/documents/v2/v2.bundle_deal.get_bundle_deal_item?module=110&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_bundle_deal_list",
+    "url": "https://open.shopee.com/documents/v2/v2.bundle_deal.get_bundle_deal_list?module=110&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "update_bundle_deal",
+    "url": "https://open.shopee.com/documents/v2/v2.bundle_deal.update_bundle_deal?module=110&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "update_bundle_deal_item",
+    "url": "https://open.shopee.com/documents/v2/v2.bundle_deal.update_bundle_deal_item?module=110&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  }
+]

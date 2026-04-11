@@ -268,8 +268,8 @@ Deno.serve(async (req) => {
 
   // Validate env vars and init supabase client inside handler so errors are catchable
   console.log('sync-orders started, checking env vars...')
-  console.log('SHOPEE_PARTNER_ID:', Deno.env.get('SHOPEE_PARTNER_ID') ? 'SET' : 'MISSING')
-  console.log('SHOPEE_PARTNER_KEY:', Deno.env.get('SHOPEE_PARTNER_KEY') ? 'SET' : 'MISSING')
+  console.log('SHOPEE_PARTNER_ID value:', Deno.env.get('SHOPEE_PARTNER_ID') ?? 'MISSING')
+  console.log('SHOPEE_PARTNER_KEY length:', Deno.env.get('SHOPEE_PARTNER_KEY')?.trim().length ?? 'MISSING')
   console.log('SHOPEE_SHOP_ID:', Deno.env.get('SHOPEE_SHOP_ID') ? 'SET' : 'MISSING')
   console.log('SUPABASE_URL:', Deno.env.get('SUPABASE_URL') ? 'SET' : 'MISSING')
   console.log('SUPABASE_SERVICE_ROLE_KEY:', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ? 'SET' : 'MISSING')

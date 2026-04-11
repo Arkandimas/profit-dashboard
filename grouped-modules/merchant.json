@@ -1,0 +1,32 @@
+[
+  {
+    "name": "get_merchant_info",
+    "url": "https://open.shopee.com/documents/v2/v2.merchant.get_merchant_info?module=93&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_merchant_prepaid_account_list",
+    "url": "https://open.shopee.com/documents/v2/v2.merchant.get_merchant_prepaid_account_list?module=93&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_merchant_warehouse_list",
+    "url": "https://open.shopee.com/documents/v2/v2.merchant.get_merchant_warehouse_list?module=93&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_merchant_warehouse_location_list",
+    "url": "https://open.shopee.com/documents/v2/v2.merchant.get_merchant_warehouse_location_list?module=93&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_shop_list_by_merchant",
+    "url": "https://open.shopee.com/documents/v2/v2.merchant.get_shop_list_by_merchant?module=93&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_warehouse_eligible_shop_list",
+    "url": "https://open.shopee.com/documents/v2/v2.merchant.get_warehouse_eligible_shop_list?module=93&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  }
+]

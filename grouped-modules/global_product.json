@@ -1,0 +1,82 @@
+[
+  {
+    "name": "add_global_item",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.add_global_item?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "add_global_model",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.add_global_model?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_global_item_id",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.get_global_item_id?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_global_item_info",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.get_global_item_info?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_global_item_limit",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.get_global_item_limit?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_global_item_list",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.get_global_item_list?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_global_model_list",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.get_global_model_list?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_local_adjustment_rate",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.get_local_adjustment_rate?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_publish_task_result",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.get_publish_task_result?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_publishable_shop",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.get_publishable_shop?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_published_list",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.get_published_list?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_shop_publishable_status",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.get_shop_publishable_status?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "update_global_item",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.update_global_item?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "update_global_model",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.update_global_model?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "update_local_adjustment_rate",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.update_local_adjustment_rate?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "update_size_chart",
+    "url": "https://open.shopee.com/documents/v2/v2.global_product.update_size_chart?module=90&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  }
+]

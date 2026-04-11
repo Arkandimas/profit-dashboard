@@ -1,0 +1,157 @@
+[
+  {
+    "name": "add_all_products_to_open_campaign",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.add_all_products_to_open_campaign?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "batch_add_products_to_open_campaign",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.batch_add_products_to_open_campaign?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "batch_edit_products_open_campaign_setting",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.batch_edit_products_open_campaign_setting?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "batch_get_products_suggested_rate",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.batch_get_products_suggested_rate?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "batch_remove_products_open_campaign_setting",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.batch_remove_products_open_campaign_setting?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "edit_affiliate_list_of_targeted_campaign",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.edit_affiliate_list_of_targeted_campaign?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "edit_all_products_open_campaign_setting",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.edit_all_products_open_campaign_setting?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "edit_product_list_of_targeted_campaign",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.edit_product_list_of_targeted_campaign?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_affiliate_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_affiliate_performance?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_campaign_key_metrics_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_campaign_key_metrics_performance?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_content_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_content_performance?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_conversion_report",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_conversion_report?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_managed_affiliate_list",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_managed_affiliate_list?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_open_campaign_added_product",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_auto_add_new_product_toggle_status?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_open_campaign_batch_task_result",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_open_campaign_batch_task_result?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_open_campaign_not_added_product",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_open_campaign_not_added_product?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_open_campaign_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_open_campaign_performance?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_optimization_suggestion_product",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_optimization_suggestion_product?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_performance_data_update_time",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_performance_data_update_time?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_product_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_product_performance?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_recommended_affiliate_list",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_recommended_affiliate_list?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_shop_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_shop_performance?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_shop_suggested_rate",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_shop_suggested_rate?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_targeted_campaign_addable_product_list",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_targeted_campaign_addable_product_list?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_targeted_campaign_list",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_targeted_campaign_list?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_targeted_campaign_performance",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_targeted_campaign_performance?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_targeted_campaign_settings",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_targeted_campaign_settings?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_validation_list",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_validation_list?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "get_validation_report",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.get_validation_report?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "update_auto_add_new_product_setting",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.update_auto_add_new_product_setting?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  },
+  {
+    "name": "update_basic_info_of_targeted_campaign",
+    "url": "https://open.shopee.com/documents/v2/v2.ams.update_basic_info_of_targeted_campaign?module=127&type=1",
+    "title": "Documentation - Shopee Open Platform"
+  }
+]
