@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json().catch(() => ({}))
-    const days: number = Math.min(Math.max(Number(body.days ?? 30), 1), 90)
+    const days: number = Math.min(Math.max(Number(body.days ?? 7), 1), 90)
 
     // Bridge tokens to DB so Edge Functions can access them
     const expiresAt = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString() // 4h default

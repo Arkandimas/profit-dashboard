@@ -312,7 +312,7 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}))
-    const days: number = Math.min(Math.max(Number(body.days ?? 30), 1), 90)
+    const days: number = Math.min(Math.max(Number(body.days ?? 7), 1), 90)
     const shopId: number = Number(body.shop_id ?? Deno.env.get('SHOPEE_SHOP_ID') ?? 0)
 
     if (!shopId) {

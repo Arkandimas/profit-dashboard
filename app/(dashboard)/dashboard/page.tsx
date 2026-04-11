@@ -151,7 +151,7 @@ export default function DashboardPage() {
     return () => clearInterval(interval)
   }, [syncStatus.state])
 
-  async function handleShopeeSync(days = 30) {
+  async function handleShopeeSync(days = 7) {
     setSyncStatus({ state: 'triggering' })
     try {
       const res = await fetch('/api/shopee/trigger-sync', {

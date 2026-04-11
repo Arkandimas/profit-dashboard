@@ -16,7 +16,7 @@ Tracks real net profit per product per storefront from Shopee marketplace.
 
 ## Shopee API
 - Partner ID: `1231100`
-- Shop ID: `2032277`
+- Shop ID: `626110197`
 - Status: Live/Online
 - Key endpoint: `get_escrow_detail` for real revenue (after platform fees ~25%)
 - TikTok Shop integration: DEFERRED — do not implement
