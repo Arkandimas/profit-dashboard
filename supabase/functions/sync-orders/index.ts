@@ -1,19 +1,24 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-const PARTNER_ID = parseInt(Deno.env.get('SHOPEE_PARTNER_ID') ?? '0')
-const PARTNER_KEY = Deno.env.get('SHOPEE_PARTNER_KEY') ?? ''
 const BASE_URL = 'https://partner.shopeemobile.com'
 
 // ─── Crypto ───────────────────────────────────────────────────────────────────
 
-async function sign(path: string, ts: number, token?: string, shopId?: number): Promise<string> {
-  const parts = [String(PARTNER_ID), path, String(ts)]
+async function sign(
+  partnerId: number,
+  partnerKey: string,
+  path: string,
+  ts: number,
+  token?: string,
+  shopId?: number
+): Promise<string> {
+  const parts = [String(partnerId), path, String(ts)]
   if (token) parts.push(token)
   if (shopId) parts.push(String(shopId))
   const enc = new TextEncoder()
   const key = await crypto.subtle.importKey(
     'raw',
-    enc.encode(PARTNER_KEY),
+    enc.encode(partnerKey),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign']
@@ -25,15 +30,17 @@ async function sign(path: string, ts: number, token?: string, shopId?: number): 
 }
 
 async function buildUrl(
+  partnerId: number,
+  partnerKey: string,
   path: string,
   params: Record<string, string | number>,
   accessToken?: string,
   shopId?: number
 ): Promise<string> {
   const ts = Math.floor(Date.now() / 1000)
-  const sig = await sign(path, ts, accessToken, shopId)
+  const sig = await sign(partnerId, partnerKey, path, ts, accessToken, shopId)
   const query = new URLSearchParams({
-    partner_id: String(PARTNER_ID),
+    partner_id: String(partnerId),
     timestamp: String(ts),
     sign: sig,
     ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])),
@@ -71,12 +78,12 @@ async function saveTokens(sb: SupabaseClient, shopId: number, accessToken: strin
   )
 }
 
-async function refreshAccessToken(sb: SupabaseClient, row: TokenRow): Promise<TokenRow> {
+async function refreshAccessToken(sb: SupabaseClient, row: TokenRow, partnerId: number, partnerKey: string): Promise<TokenRow> {
   const path = '/api/v2/auth/access_token/get'
   const ts = Math.floor(Date.now() / 1000)
-  const sig = await sign(path, ts)
+  const sig = await sign(partnerId, partnerKey, path, ts)
   const query = new URLSearchParams({
-    partner_id: String(PARTNER_ID),
+    partner_id: String(partnerId),
     timestamp: String(ts),
     sign: sig,
   })
@@ -86,7 +93,7 @@ async function refreshAccessToken(sb: SupabaseClient, row: TokenRow): Promise<To
     body: JSON.stringify({
       refresh_token: row.refresh_token,
       shop_id: row.shop_id,
-      partner_id: PARTNER_ID,
+      partner_id: partnerId,
     }),
   })
   if (!res.ok) throw new Error(`Token refresh HTTP ${res.status}`)
@@ -97,14 +104,14 @@ async function refreshAccessToken(sb: SupabaseClient, row: TokenRow): Promise<To
   return { ...row, access_token: data.access_token, refresh_token: data.refresh_token }
 }
 
-async function getValidToken(sb: SupabaseClient, shopId: number): Promise<TokenRow> {
+async function getValidToken(sb: SupabaseClient, shopId: number, partnerId: number, partnerKey: string): Promise<TokenRow> {
   const row = await loadTokens(sb, shopId)
   if (!row) throw new Error('No Shopee tokens found. Reconnect in Settings.')
 
   const expiresAt = new Date(row.expires_at).getTime()
   const twoMinutes = 2 * 60 * 1000
   if (Date.now() + twoMinutes >= expiresAt) {
-    return refreshAccessToken(sb, row)
+    return refreshAccessToken(sb, row, partnerId, partnerKey)
   }
   return row
 }
@@ -145,6 +152,8 @@ interface OrderDetail {
 }
 
 async function getOrderListAll(
+  partnerId: number,
+  partnerKey: string,
   accessToken: string,
   shopId: number,
   fromTs: number,
@@ -163,7 +172,7 @@ async function getOrderListAll(
     }
     if (cursor) params.cursor = cursor
 
-    const url = await buildUrl(path, params, accessToken, shopId)
+    const url = await buildUrl(partnerId, partnerKey, path, params, accessToken, shopId)
     const res = await fetch(url)
     if (!res.ok) {
       const body = await res.text().catch(() => '(unreadable)')
@@ -183,12 +192,16 @@ async function getOrderListAll(
 }
 
 async function getOrderDetail(
+  partnerId: number,
+  partnerKey: string,
   orderSnList: string[],
   accessToken: string,
   shopId: number
 ): Promise<OrderDetail[]> {
   const path = '/api/v2/order/get_order_detail'
   const url = await buildUrl(
+    partnerId,
+    partnerKey,
     path,
     {
       order_sn_list: orderSnList.join(','),
@@ -283,11 +296,16 @@ Deno.serve(async (req) => {
     return Response.json({ error: `Missing env vars: ${missing}` }, { status: 500 })
   }
 
-  if (!PARTNER_ID || !PARTNER_KEY) {
-    const missing = [!PARTNER_ID && 'SHOPEE_PARTNER_ID', !PARTNER_KEY && 'SHOPEE_PARTNER_KEY'].filter(Boolean).join(', ')
+  const partnerId = parseInt(Deno.env.get('SHOPEE_PARTNER_ID')?.trim() ?? '0')
+  const partnerKey = Deno.env.get('SHOPEE_PARTNER_KEY')?.trim() ?? ''
+
+  if (!partnerId || !partnerKey) {
+    const missing = [!partnerId && 'SHOPEE_PARTNER_ID', !partnerKey && 'SHOPEE_PARTNER_KEY'].filter(Boolean).join(', ')
     console.error('FATAL: missing Shopee env vars:', missing)
     return Response.json({ error: `Missing env vars: ${missing}` }, { status: 500 })
   }
+
+  console.log(`sync-orders: partnerId=${partnerId}, partnerKey length=${partnerKey.length}`)
 
   const supabase = createClient(supabaseUrl, serviceRoleKey)
   const startMs = Date.now()
@@ -303,7 +321,7 @@ Deno.serve(async (req) => {
 
     console.log(`sync-orders: shopId=${shopId}, days=${days}`)
 
-    const tokenRow = await getValidToken(supabase, shopId)
+    const tokenRow = await getValidToken(supabase, shopId, partnerId, partnerKey)
     console.log(`sync-orders: token loaded, expires_at=${tokenRow.expires_at}, now=${new Date().toISOString()}`)
     const { access_token: accessToken } = tokenRow
 
@@ -314,7 +332,7 @@ Deno.serve(async (req) => {
     // Fetch all order summaries across all chunks
     const allSummaries: OrderSummary[] = []
     for (const chunk of chunks) {
-      const summaries = await getOrderListAll(accessToken, shopId, chunk.start, chunk.end)
+      const summaries = await getOrderListAll(partnerId, partnerKey, accessToken, shopId, chunk.start, chunk.end)
       allSummaries.push(...summaries)
     }
 
@@ -333,7 +351,7 @@ Deno.serve(async (req) => {
     for (let i = 0; i < allSummaries.length; i += DETAIL_BATCH) {
       const batch = allSummaries.slice(i, i + DETAIL_BATCH)
       const sns = batch.map((o) => o.order_sn)
-      const details = await getOrderDetail(sns, accessToken, shopId)
+      const details = await getOrderDetail(partnerId, partnerKey, sns, accessToken, shopId)
 
       for (const detail of details) {
         const update = mapDetailToUpdate(detail)
