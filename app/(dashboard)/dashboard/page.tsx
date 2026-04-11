@@ -101,29 +101,41 @@ export default function DashboardPage() {
   async function handleShopeeSync(days = 30) {
     setSyncStatus({ state: 'loading', msg: `Listing orders (last ${days} days)…` })
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 300_000) // 5 min — details loop needs time for large stores
+    const timeout = setTimeout(() => controller.abort(), 600_000) // 10 min for large stores
     try {
-      // ── Step 1: Fetch order list stubs ────────────────────────────────────
-      // Default: 30 days (2 × 15-day chunks). Full sync: 90 days (6 chunks).
-      // Each chunk paginates independently; all results upserted as stubs.
-      const ordersRes = await fetch(`/api/shopee/sync/orders?days=${days}`, { method: 'POST', signal: controller.signal })
-      const ordersData = await ordersRes.json().catch(() => ({ error: `Server error (HTTP ${ordersRes.status})` }))
-      if (ordersData.reconnect_required) {
-        clearTimeout(timeout)
-        setSyncStatus({
-          state: 'error',
-          message: 'Session expired — please reconnect Shopee in Settings.',
-          reconnect_required: true,
-        })
-        return
-      }
-      if (!ordersRes.ok) throw new Error(ordersData.error ?? 'Order sync failed')
+      // ── Step 1: Fetch order list stubs — ONE chunk per call ───────────────
+      // Each call processes 1 × 15-day chunk to stay within Vercel Hobby 10s.
+      // Frontend loops until the API reports done: true.
+      let totalQueued = 0
+      let chunkIdx = 0
+      while (true) {
+        setSyncStatus({ state: 'loading', msg: `Listing orders chunk ${chunkIdx + 1}… (${totalQueued} so far)` })
+        const ordersRes = await fetch(
+          `/api/shopee/sync/orders?days=${days}&chunk=${chunkIdx}`,
+          { method: 'POST', signal: controller.signal }
+        )
+        const ordersData = await ordersRes.json().catch(() => ({ error: `Server error (HTTP ${ordersRes.status})` }))
+        if (ordersData.reconnect_required) {
+          clearTimeout(timeout)
+          setSyncStatus({
+            state: 'error',
+            message: 'Session expired — please reconnect Shopee in Settings.',
+            reconnect_required: true,
+          })
+          return
+        }
+        if (!ordersRes.ok) throw new Error(ordersData.error ?? 'Order sync failed')
 
-      const queued: number = ordersData.synced ?? 0
-      setSyncStatus({ state: 'loading', msg: `Orders listed: ${queued} — fetching details…` })
+        totalQueued += ordersData.synced ?? 0
+        chunkIdx++
+
+        if (ordersData.done) break
+      }
+
+      setSyncStatus({ state: 'loading', msg: `Orders listed: ${totalQueued} — fetching details…` })
 
       // ── Step 2: Fetch order details in batches until done ──────────────────
-      // Each call processes up to 50 orders, finishes in < 5s on Hobby plan.
+      // Each call processes up to 20 orders (Hobby 10s safe).
       let detailsSynced = 0
       let detailsIteration = 0
       while (true) {
@@ -135,8 +147,8 @@ export default function DashboardPage() {
         detailsIteration++
         setSyncStatus({ state: 'loading', msg: `Details synced: ${detailsSynced}${detailsData.remaining > 0 ? `, ${detailsData.remaining} remaining…` : ''}` })
 
-        // Refresh DB view every 3 detail batches so dashboard updates live
-        if (detailsIteration % 3 === 0) {
+        // Refresh DB view every 5 detail batches so dashboard updates live
+        if (detailsIteration % 5 === 0) {
           fetch('/api/orders?days=90').then((r) => r.json()).then((data) => {
             if (Array.isArray(data)) setLiveOrders(data)
           }).catch(() => {})
@@ -150,11 +162,8 @@ export default function DashboardPage() {
         if (Array.isArray(data)) setLiveOrders(data)
       }).catch(() => {})
 
-      // Escrow sync is handled by a background cron job (every 15 min).
-      // Skipping it here prevents timeouts on large stores (1000+ orders).
-
       clearTimeout(timeout)
-      setSyncStatus({ state: 'success', orderCount: queued, escrowCount: 0 })
+      setSyncStatus({ state: 'success', orderCount: totalQueued, escrowCount: 0 })
 
       // Final refresh with fully-synced data
       const ordFinal = await fetch('/api/orders?days=90').then((r) => r.json())

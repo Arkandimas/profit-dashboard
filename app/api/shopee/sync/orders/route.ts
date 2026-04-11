@@ -8,10 +8,8 @@ import {
   type ShopeeOrderSummary,
 } from '@/lib/shopee'
 
-// This route only lists orders and upserts stubs — no detail fetching.
-// 90-day full sync: 6 × 15-day chunks, each with its own pagination loop.
-// Worst case: ~6 chunks × ~3 paginated API calls × ~2s = ~36s. Use 60s to be safe.
-export const maxDuration = 60
+// Vercel Hobby: max 10s. Keep maxDuration at 10.
+export const maxDuration = 10
 
 const supabase = createClient(
   process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -26,11 +24,6 @@ const COOKIE_OPTS = {
   maxAge: 60 * 60 * 24 * 30,
 }
 
-/**
- * Maps a getOrderList summary to a minimal DB stub row.
- * revenue=0 signals to /sync/details that this order needs enrichment.
- * ignoreDuplicates: true on upsert ensures already-enriched orders are not overwritten.
- */
 function mapSummaryToStub(order: ShopeeOrderSummary) {
   return {
     platform: 'Shopee' as const,
@@ -56,6 +49,14 @@ function isTokenExpiredError(err: unknown): boolean {
   return /HTTP 40[13]/.test(err.message) || /invalid_access_token|auth\.token\.expired/.test(err.message)
 }
 
+/**
+ * POST /api/shopee/sync/orders?days=90&chunk=0
+ *
+ * Processes ONE 15-day chunk per call to stay within Vercel Hobby 10s limit.
+ * Frontend should call repeatedly, incrementing `chunk` until response has `done: true`.
+ *
+ * Response: { success, synced, chunk, totalChunks, done }
+ */
 export async function POST(request: Request) {
   try {
     const jar = await cookies()
@@ -99,37 +100,38 @@ export async function POST(request: Request) {
 
     const { searchParams } = new URL(request.url)
     const days = Math.min(Math.max(parseInt(searchParams.get('days') ?? '30'), 1), 90)
+    const chunkIndex = Math.max(parseInt(searchParams.get('chunk') ?? '0'), 0)
+
     const nowTs = Math.floor(Date.now() / 1000)
     const fromTs = nowTs - days * 86400
-    const chunks = chunkDateRange(fromTs, nowTs)
+    const allChunks = chunkDateRange(fromTs, nowTs)
+    const totalChunks = allChunks.length
 
+    // If chunk index exceeds available chunks, we're done
+    if (chunkIndex >= totalChunks) {
+      const res = NextResponse.json({ success: true, synced: 0, chunk: chunkIndex, totalChunks, done: true })
+      persistTokensIfRefreshed(res, refreshedAccessToken, refreshedRefreshToken)
+      return res
+    }
+
+    const currentChunk = allChunks[chunkIndex]
     let synced = 0
 
     const runSync = async (tkn: string) => {
       synced = 0
 
-      // Collect all order summaries across date chunks.
-      // No status filter — syncs all paid orders (READY_TO_SHIP, SHIPPED, COMPLETED)
-      // so our counts match Shopee Seller Center "Pesanan Dibayar".
-      // UNPAID/CANCELLED/RETURNED are excluded later by the details route.
-      const allSummaries: ShopeeOrderSummary[] = []
-      for (const chunk of chunks) {
-        const summaries = await getOrderList(tkn, shopId, chunk.start, chunk.end)
-        allSummaries.push(...summaries)
-      }
+      // Fetch only ONE chunk's orders
+      const summaries = await getOrderList(tkn, shopId, currentChunk.start, currentChunk.end)
 
-      if (allSummaries.length === 0) return
+      if (summaries.length === 0) return
 
-      // Process stubs in batches of 100.
-      // Split into INSERT (new orders only) + UPDATE (status & gmv only for existing).
-      // This ensures status changes (e.g. UNPAID → READY_TO_SHIP) are captured
-      // without overwriting already-enriched fields (revenue, escrow_synced, etc.).
-      const STUB_BATCH = 100
-      for (let i = 0; i < allSummaries.length; i += STUB_BATCH) {
-        const batch = allSummaries.slice(i, i + STUB_BATCH)
+      // Process stubs in batches of 50 (smaller batch for speed)
+      const STUB_BATCH = 50
+      for (let i = 0; i < summaries.length; i += STUB_BATCH) {
+        const batch = summaries.slice(i, i + STUB_BATCH)
         const batchOrderIds = batch.map((s) => s.order_sn)
 
-        // Step 1: Find which order_ids already exist in DB.
+        // Find which order_ids already exist in DB
         const { data: existing, error: fetchError } = await supabase
           .from('orders')
           .select('order_id')
@@ -138,7 +140,7 @@ export async function POST(request: Request) {
 
         const existingIdSet = new Set((existing ?? []).map((r) => r.order_id as string))
 
-        // Step 2: INSERT stubs for orders not yet in DB.
+        // INSERT stubs for new orders
         const newRows = batch
           .filter((s) => !existingIdSet.has(s.order_sn))
           .map(mapSummaryToStub)
@@ -147,25 +149,27 @@ export async function POST(request: Request) {
           if (insertError) throw new Error(`Supabase stub insert failed: ${insertError.message}`)
         }
 
-        // Step 3: UPDATE only status & gmv for orders that already exist.
-        // Never touch revenue, escrow_synced, buyer_paid_amount, etc.
+        // UPDATE status & gmv for existing orders
         const existingRows = batch.filter((s) => existingIdSet.has(s.order_sn))
-        for (const summary of existingRows) {
+        if (existingRows.length > 0) {
+          // Batch update using upsert with onConflict to avoid N individual updates
+          const updateRows = existingRows.map((summary) => ({
+            order_id: summary.order_sn,
+            platform: 'Shopee' as const,
+            status: summary.order_status ?? 'UNKNOWN',
+            gmv: summary.total_amount ?? 0,
+            ...(summary.pay_time
+              ? { paid_at: new Date(summary.pay_time * 1000).toISOString() }
+              : {}),
+          }))
           const { error: updateError } = await supabase
             .from('orders')
-            .update({
-              status: summary.order_status ?? 'UNKNOWN',
-              gmv: summary.total_amount ?? 0,
-              paid_at: summary.pay_time
-                ? new Date(summary.pay_time * 1000).toISOString()
-                : undefined,
-            })
-            .eq('order_id', summary.order_sn)
+            .upsert(updateRows, { onConflict: 'order_id', ignoreDuplicates: false })
           if (updateError) throw new Error(`Supabase status update failed: ${updateError.message}`)
         }
       }
 
-      synced = allSummaries.length
+      synced = summaries.length
     }
 
     try {
@@ -205,7 +209,14 @@ export async function POST(request: Request) {
       }
     }
 
-    const res = NextResponse.json({ success: true, synced, days })
+    const done = chunkIndex + 1 >= totalChunks
+    const res = NextResponse.json({
+      success: true,
+      synced,
+      chunk: chunkIndex,
+      totalChunks,
+      done,
+    })
     persistTokensIfRefreshed(res, refreshedAccessToken, refreshedRefreshToken)
     return res
   } catch (err) {

@@ -3,8 +3,8 @@ import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
 import { getEscrowDetail, refreshAccessToken } from '@/lib/shopee'
 
-// Pro plan: up to 60s. Hobby plan: capped at 10s regardless.
-export const maxDuration = 60
+// Vercel Hobby: max 10s per call.
+export const maxDuration = 10
 
 const supabase = createClient(
   process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -22,8 +22,9 @@ const COOKIE_OPTS = {
 // Uppercase: matches how Shopee returns status (COMPLETED, TO_CONFIRM_RECEIVE)
 const ESCROW_ELIGIBLE_STATUSES = ['COMPLETED', 'TO_CONFIRM_RECEIVE']
 
-// 5 concurrent Shopee API calls per request — fast enough for Hobby's 10s limit
-const BATCH_SIZE = 5
+// 3 orders per call — sequential with ~150ms delay = ~3 × 2s = ~6s + DB overhead = ~8s total
+// Must stay within Vercel Hobby 10s limit.
+const BATCH_SIZE = 3
 
 export async function POST() {
   try {
@@ -79,7 +80,7 @@ export async function POST() {
     for (const order of orders) {
       let escrow = null
       try {
-        escrow = await getEscrowDetail(order.order_id, accessToken!, shopId, 15_000)
+        escrow = await getEscrowDetail(order.order_id, accessToken!, shopId, 6_000)
       } catch {
         // Per-order failure: skip and continue
         await new Promise<void>((r) => setTimeout(r, 150))

@@ -39,7 +39,7 @@ function buildUrl(
 // Every Shopee API call uses this wrapper so that a slow/stalled response from
 // Shopee's servers does not cause our Vercel function to hang until the platform
 // kills it (10 s on Hobby, 60 s on Pro). 8 s leaves headroom for retries/DB.
-function shopFetch(url: string, init: RequestInit = {}, timeoutMs = 8_000): Promise<Response> {
+function shopFetch(url: string, init: RequestInit = {}, timeoutMs = 6_000): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer))
@@ -428,7 +428,7 @@ export async function getEscrowDetail(
   orderSn: string,
   accessToken: string,
   shopId: number,
-  timeoutMs = 15_000
+  timeoutMs = 6_000
 ): Promise<ShopeeEscrowDetail> {
   const path = '/api/v2/payment/get_escrow_detail'
   const url = buildUrl(path, { order_sn: orderSn }, accessToken, shopId)

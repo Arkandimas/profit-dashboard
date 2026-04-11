@@ -7,8 +7,8 @@ import {
   type ShopeeOrderDetail,
 } from '@/lib/shopee'
 
-// Pro plan: up to 60s. Hobby plan: capped at 10s regardless.
-export const maxDuration = 60
+// Vercel Hobby: max 10s per call. Process small batches, frontend loops until done.
+export const maxDuration = 10
 
 const supabase = createClient(
   process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -23,8 +23,9 @@ const COOKIE_OPTS = {
   maxAge: 60 * 60 * 24 * 30,
 }
 
-// Orders processed per call. 10 order_sn per getOrderDetail call × N calls.
-const BATCH_SIZE = 50
+// Orders processed per call. 10 order_sn per getOrderDetail API call × 2 sub-batches = 20.
+// Must complete within Vercel Hobby 10s limit (API ~2s + DB ~1s per sub-batch).
+const BATCH_SIZE = 20
 
 // Only exclude UNPAID — cancelled/returned orders also need detail enrichment
 // so their gmv, voucher_from_seller, etc. are populated for Penjualan KPI.
@@ -62,7 +63,7 @@ function mapDetailToRow(order: ShopeeOrderDetail) {
     platform: 'Shopee' as const,
     order_id: order.order_sn,
     gmv,
-    // revenue = buyer_paid_amount: what buyer actually paid after all discounts
+    // revenue: DEPRECATED — kept for backward compat until schema migration
     revenue: buyerPaid,
     buyer_paid_amount: buyerPaid,
     voucher_from_seller: voucherSeller,
