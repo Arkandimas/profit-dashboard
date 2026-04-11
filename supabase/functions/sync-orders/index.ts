@@ -366,13 +366,14 @@ Deno.serve(async (req) => {
     const durationMs = Date.now() - startMs
 
     // Log to sync_logs
-    await supabase.from('sync_logs').insert({
+    const { error: logErr } = await supabase.from('sync_logs').insert({
       sync_type: 'orders',
       status: 'success',
       synced_count: detailsSynced,
       duration_ms: durationMs,
       metadata: { days, chunks: chunks.length, summaries: allSummaries.length },
     })
+    if (logErr) console.error('sync-orders: failed to write sync_logs:', logErr)
 
     return Response.json({ synced: detailsSynced, duration_ms: durationMs })
   } catch (err) {
