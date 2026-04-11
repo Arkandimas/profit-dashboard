@@ -57,7 +57,8 @@ const PIE_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6']
 
 type SyncStatus =
   | { state: 'idle' }
-  | { state: 'loading'; msg: string }
+  | { state: 'triggering' }
+  | { state: 'polling'; msg: string }
   | { state: 'success'; orderCount: number; escrowCount: number }
   | { state: 'error'; message: string; reconnect_required?: boolean }
 type EscrowSyncStatus = { state: 'idle' } | { state: 'loading' } | { state: 'success'; count: number } | { state: 'error'; message: string }
@@ -98,98 +99,88 @@ export default function DashboardPage() {
       .catch(() => { /* keep empty */ })
   }, [])
 
+  // Polling: check sync_logs for the latest entry every 5s while sync is in progress.
+  // Stop after 3 minutes or when status changes to success/error.
+  useEffect(() => {
+    if (syncStatus.state !== 'polling') return
+
+    const POLL_INTERVAL_MS = 5_000
+    const MAX_POLL_MS = 3 * 60 * 1000
+    const startTime = Date.now()
+    let lastSyncTs: string | null = null
+
+    const interval = setInterval(async () => {
+      if (Date.now() - startTime > MAX_POLL_MS) {
+        clearInterval(interval)
+        setSyncStatus({ state: 'error', message: 'Sync timed out — check back in a moment.' })
+        return
+      }
+
+      try {
+        const res = await fetch('/api/shopee/sync-status')
+        if (!res.ok) return
+        const data = await res.json()
+
+        if (!data.last_sync) return
+
+        const isNew = lastSyncTs === null || data.last_sync !== lastSyncTs
+
+        if (isNew && data.status === 'success') {
+          lastSyncTs = data.last_sync
+          clearInterval(interval)
+
+          // Refresh orders from DB
+          const ord = await fetch('/api/orders?days=90').then((r) => r.json())
+          setLiveOrders(Array.isArray(ord) ? ord : [])
+          setSyncStatus({ state: 'success', orderCount: data.synced_count ?? 0, escrowCount: 0 })
+          setTimeout(() => setSyncStatus({ state: 'idle' }), 5_000)
+        } else if (isNew && data.status === 'error') {
+          lastSyncTs = data.last_sync
+          clearInterval(interval)
+          setSyncStatus({ state: 'error', message: 'Sync failed — check Edge Function logs.' })
+          setTimeout(() => setSyncStatus({ state: 'idle' }), 5_000)
+        } else if (!lastSyncTs) {
+          // Still waiting for first log entry
+          setSyncStatus({ state: 'polling', msg: 'Sync running on server…' })
+        }
+      } catch {
+        // Transient network error — keep polling
+      }
+    }, POLL_INTERVAL_MS)
+
+    return () => clearInterval(interval)
+  }, [syncStatus.state])
+
   async function handleShopeeSync(days = 30) {
-    setSyncStatus({ state: 'loading', msg: `Syncing orders (last ${days} days)…` })
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 900_000) // 15 min for 5000+ orders
+    setSyncStatus({ state: 'triggering' })
     try {
-      // ── Step 1: Fetch order list stubs — ONE PAGE (100 orders) per call ───
-      // Each call: 1 Shopee API call + 1 DB upsert = ~4s (well within 10s).
-      // Frontend loops through chunks and pages until allDone.
-      let totalQueued = 0
-      let chunkIdx = 0
-      let cursor = ''
-      let callCount = 0
+      const res = await fetch('/api/shopee/trigger-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days }),
+      })
+      const data = await res.json()
 
-      while (true) {
-        callCount++
-        setSyncStatus({ state: 'loading', msg: `Listing orders… ${totalQueued} found (call ${callCount})` })
-
-        const params = new URLSearchParams({
-          days: String(days),
-          chunk: String(chunkIdx),
+      if (data.reconnect_required) {
+        setSyncStatus({
+          state: 'error',
+          message: 'Session expired — please reconnect Shopee in Settings.',
+          reconnect_required: true,
         })
-        if (cursor) params.set('cursor', cursor)
-
-        const ordersRes = await fetch(
-          `/api/shopee/sync/orders?${params}`,
-          { method: 'POST', signal: controller.signal }
-        )
-        const data = await ordersRes.json().catch(() => ({ error: `HTTP ${ordersRes.status}` }))
-
-        if (data.reconnect_required) {
-          clearTimeout(timeout)
-          setSyncStatus({
-            state: 'error',
-            message: 'Session expired — please reconnect Shopee in Settings.',
-            reconnect_required: true,
-          })
-          return
-        }
-        if (!ordersRes.ok) throw new Error(data.error ?? 'Order sync failed')
-
-        totalQueued += data.synced ?? 0
-
-        if (data.allDone) break
-
-        if (data.chunkDone) {
-          // Move to next chunk, reset cursor
-          chunkIdx++
-          cursor = ''
-        } else {
-          // Continue pagination within same chunk
-          cursor = data.cursor ?? ''
-        }
+        setTimeout(() => setSyncStatus({ state: 'idle' }), 5_000)
+        return
       }
 
-      setSyncStatus({ state: 'loading', msg: `Orders listed: ${totalQueued} — fetching details…` })
-
-      // ── Step 2: Fetch order details — 10 orders per call ──────────────────
-      let detailsSynced = 0
-      let detailsIteration = 0
-      while (true) {
-        const detailsRes = await fetch('/api/shopee/sync/details', { method: 'POST', signal: controller.signal })
-        const detailsData = await detailsRes.json().catch(() => ({ done: true, updated: 0, remaining: 0 }))
-        if (!detailsRes.ok) break
-
-        detailsSynced += detailsData.updated ?? 0
-        detailsIteration++
-        const remaining = detailsData.remaining ?? 0
-        setSyncStatus({ state: 'loading', msg: `Details: ${detailsSynced} synced${remaining > 0 ? `, ${remaining} left` : ''}` })
-
-        // Live refresh every 10 batches
-        if (detailsIteration % 10 === 0) {
-          fetch('/api/orders?days=90').then((r) => r.json()).then((d) => {
-            if (Array.isArray(d)) setLiveOrders(d)
-          }).catch(() => {})
-        }
-
-        if (detailsData.done) break
+      if (!res.ok) {
+        setSyncStatus({ state: 'error', message: data.error ?? 'Trigger failed' })
+        setTimeout(() => setSyncStatus({ state: 'idle' }), 5_000)
+        return
       }
 
-      clearTimeout(timeout)
-      setSyncStatus({ state: 'success', orderCount: totalQueued, escrowCount: 0 })
-
-      // Final refresh
-      const ordFinal = await fetch('/api/orders?days=90').then((r) => r.json())
-      setLiveOrders(Array.isArray(ordFinal) ? ordFinal : [])
+      setSyncStatus({ state: 'polling', msg: `Sync triggered (last ${days} days) — running on server…` })
     } catch (err) {
-      clearTimeout(timeout)
-      const message = err instanceof Error
-        ? (err.name === 'AbortError' ? 'Sync timed out — try again' : err.message)
-        : 'Sync failed'
+      const message = err instanceof Error ? err.message : 'Trigger failed'
       setSyncStatus({ state: 'error', message })
-    } finally {
       setTimeout(() => setSyncStatus({ state: 'idle' }), 5_000)
     }
   }
@@ -388,7 +379,12 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {syncStatus.state === 'loading' && (
+          {syncStatus.state === 'triggering' && (
+            <span className="text-sm text-orange-600 font-medium">
+              Triggering sync…
+            </span>
+          )}
+          {syncStatus.state === 'polling' && (
             <span className="text-sm text-orange-600 font-medium">
               {syncStatus.msg}
             </span>
@@ -423,11 +419,11 @@ export default function DashboardPage() {
               variant="outline"
               size="sm"
               onClick={() => handleShopeeSync(30)}
-              disabled={syncStatus.state === 'loading'}
+              disabled={syncStatus.state === 'triggering' || syncStatus.state === 'polling'}
               className="border-orange-200 text-orange-600 hover:bg-orange-50 hover:text-orange-700"
             >
-              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${syncStatus.state === 'loading' ? 'animate-spin' : ''}`} />
-              {syncStatus.state === 'loading' ? 'Syncing…' : 'Sync Shopee (30 days)'}
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${syncStatus.state === 'triggering' || syncStatus.state === 'polling' ? 'animate-spin' : ''}`} />
+              {syncStatus.state === 'triggering' || syncStatus.state === 'polling' ? 'Syncing…' : 'Sync Shopee (30 days)'}
             </Button>
           )}
           {shopeeConnected === true && (
@@ -435,11 +431,11 @@ export default function DashboardPage() {
               variant="outline"
               size="sm"
               onClick={() => handleShopeeSync(90)}
-              disabled={syncStatus.state === 'loading'}
+              disabled={syncStatus.state === 'triggering' || syncStatus.state === 'polling'}
               className="border-purple-200 text-purple-600 hover:bg-purple-50 hover:text-purple-700"
             >
-              <Database className={`w-3.5 h-3.5 mr-1.5 ${syncStatus.state === 'loading' ? 'animate-spin' : ''}`} />
-              {syncStatus.state === 'loading' ? 'Syncing…' : 'Full Sync (90 days)'}
+              <Database className={`w-3.5 h-3.5 mr-1.5 ${syncStatus.state === 'triggering' || syncStatus.state === 'polling' ? 'animate-spin' : ''}`} />
+              {syncStatus.state === 'triggering' || syncStatus.state === 'polling' ? 'Syncing…' : 'Full Sync (90 days)'}
             </Button>
           )}
           {shopeeConnected === true && (

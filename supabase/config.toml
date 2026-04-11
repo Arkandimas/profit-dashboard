@@ -1,0 +1,2 @@
+[functions.scheduled-sync]
+schedule = "0 */6 * * *"
