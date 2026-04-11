@@ -3,12 +3,12 @@ import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
 import {
   chunkDateRange,
-  getOrderList,
+  getOrderListPage,
   refreshAccessToken,
   type ShopeeOrderSummary,
 } from '@/lib/shopee'
 
-// Vercel Hobby: max 10s. Keep maxDuration at 10.
+// Vercel Hobby: hard cap 10s. Each call does 1 Shopee API + 1 DB batch = ~4s.
 export const maxDuration = 10
 
 const supabase = createClient(
@@ -50,12 +50,18 @@ function isTokenExpiredError(err: unknown): boolean {
 }
 
 /**
- * POST /api/shopee/sync/orders?days=90&chunk=0
+ * POST /api/shopee/sync/orders?days=90&chunk=0&cursor=ABC
  *
- * Processes ONE 15-day chunk per call to stay within Vercel Hobby 10s limit.
- * Frontend should call repeatedly, incrementing `chunk` until response has `done: true`.
+ * Fetches exactly ONE PAGE (max 100 orders) per call.
+ * Frontend loops, passing back the cursor until done.
  *
- * Response: { success, synced, chunk, totalChunks, done }
+ * State machine:
+ *   chunk=0,cursor=''  → fetch page 1 of chunk 0
+ *   chunk=0,cursor=X   → fetch next page of chunk 0
+ *   chunk=0,done→true  → move to chunk=1,cursor=''
+ *   ...until chunk >= totalChunks → fully done
+ *
+ * Response: { success, synced, chunk, totalChunks, cursor, chunkDone, allDone }
  */
 export async function POST(request: Request) {
   try {
@@ -94,22 +100,27 @@ export async function POST(request: Request) {
         refreshedAccessToken = newTokens.access_token
         refreshedRefreshToken = newTokens.refresh_token
       } catch {
-        // Non-fatal: continue with current token.
+        // Non-fatal
       }
     }
 
     const { searchParams } = new URL(request.url)
     const days = Math.min(Math.max(parseInt(searchParams.get('days') ?? '30'), 1), 90)
     const chunkIndex = Math.max(parseInt(searchParams.get('chunk') ?? '0'), 0)
+    const cursor = searchParams.get('cursor') || undefined
 
     const nowTs = Math.floor(Date.now() / 1000)
     const fromTs = nowTs - days * 86400
     const allChunks = chunkDateRange(fromTs, nowTs)
     const totalChunks = allChunks.length
 
-    // If chunk index exceeds available chunks, we're done
+    // Past all chunks → fully done
     if (chunkIndex >= totalChunks) {
-      const res = NextResponse.json({ success: true, synced: 0, chunk: chunkIndex, totalChunks, done: true })
+      const res = NextResponse.json({
+        success: true, synced: 0,
+        chunk: chunkIndex, totalChunks,
+        cursor: '', chunkDone: true, allDone: true,
+      })
       persistTokensIfRefreshed(res, refreshedAccessToken, refreshedRefreshToken)
       return res
     }
@@ -117,63 +128,44 @@ export async function POST(request: Request) {
     const currentChunk = allChunks[chunkIndex]
     let synced = 0
 
-    const runSync = async (tkn: string) => {
-      synced = 0
+    const runPage = async (tkn: string) => {
+      // Fetch exactly ONE page (max 100 orders)
+      const page = await getOrderListPage(
+        tkn, shopId, currentChunk.start, currentChunk.end, cursor
+      )
 
-      // Fetch only ONE chunk's orders
-      const summaries = await getOrderList(tkn, shopId, currentChunk.start, currentChunk.end)
-
-      if (summaries.length === 0) return
-
-      // Process stubs in batches of 50 (smaller batch for speed)
-      const STUB_BATCH = 50
-      for (let i = 0; i < summaries.length; i += STUB_BATCH) {
-        const batch = summaries.slice(i, i + STUB_BATCH)
-        const batchOrderIds = batch.map((s) => s.order_sn)
-
-        // Find which order_ids already exist in DB
-        const { data: existing, error: fetchError } = await supabase
+      const summaries = page.orders
+      if (summaries.length > 0) {
+        // Upsert all orders in this page
+        const rows = summaries.map(mapSummaryToStub)
+        const { error: upsertError } = await supabase
           .from('orders')
-          .select('order_id')
-          .in('order_id', batchOrderIds)
-        if (fetchError) throw new Error(`Supabase fetch existing orders failed: ${fetchError.message}`)
+          .upsert(rows, { onConflict: 'order_id', ignoreDuplicates: true })
+        if (upsertError) throw new Error(`Supabase upsert failed: ${upsertError.message}`)
 
-        const existingIdSet = new Set((existing ?? []).map((r) => r.order_id as string))
-
-        // INSERT stubs for new orders
-        const newRows = batch
-          .filter((s) => !existingIdSet.has(s.order_sn))
-          .map(mapSummaryToStub)
-        if (newRows.length > 0) {
-          const { error: insertError } = await supabase.from('orders').insert(newRows)
-          if (insertError) throw new Error(`Supabase stub insert failed: ${insertError.message}`)
-        }
-
-        // UPDATE status & gmv for existing orders
-        const existingRows = batch.filter((s) => existingIdSet.has(s.order_sn))
-        if (existingRows.length > 0) {
-          // Batch update using upsert with onConflict to avoid N individual updates
-          const updateRows = existingRows.map((summary) => ({
-            order_id: summary.order_sn,
-            platform: 'Shopee' as const,
-            status: summary.order_status ?? 'UNKNOWN',
-            gmv: summary.total_amount ?? 0,
-            ...(summary.pay_time
-              ? { paid_at: new Date(summary.pay_time * 1000).toISOString() }
-              : {}),
-          }))
-          const { error: updateError } = await supabase
+        // Update status & gmv for existing orders (separate call to not overwrite enriched data)
+        const updateRows = summaries.map((s) => ({
+          order_id: s.order_sn,
+          status: s.order_status ?? 'UNKNOWN',
+          gmv: s.total_amount ?? 0,
+          ...(s.pay_time ? { paid_at: new Date(s.pay_time * 1000).toISOString() } : {}),
+        }))
+        for (const row of updateRows) {
+          await supabase
             .from('orders')
-            .upsert(updateRows, { onConflict: 'order_id', ignoreDuplicates: false })
-          if (updateError) throw new Error(`Supabase status update failed: ${updateError.message}`)
+            .update({ status: row.status, gmv: row.gmv, ...(row.paid_at ? { paid_at: row.paid_at } : {}) })
+            .eq('order_id', row.order_id)
+            // Ignore errors on individual updates — non-fatal
         }
       }
 
       synced = summaries.length
+      return page
     }
 
+    let page
     try {
-      await runSync(accessToken)
+      page = await runPage(accessToken)
     } catch (err) {
       if (!isTokenExpiredError(err)) throw err
 
@@ -200,7 +192,7 @@ export async function POST(request: Request) {
       refreshedRefreshToken = freshTokens.refresh_token
 
       try {
-        await runSync(accessToken)
+        page = await runPage(accessToken)
       } catch {
         return NextResponse.json(
           { error: 'Shopee session expired. Please reconnect in Settings.', reconnect_required: true },
@@ -209,13 +201,17 @@ export async function POST(request: Request) {
       }
     }
 
-    const done = chunkIndex + 1 >= totalChunks
+    const chunkDone = !page.hasMore || !page.nextCursor
+    const allDone = chunkDone && chunkIndex + 1 >= totalChunks
+
     const res = NextResponse.json({
       success: true,
       synced,
       chunk: chunkIndex,
       totalChunks,
-      done,
+      cursor: chunkDone ? '' : page.nextCursor,
+      chunkDone,
+      allDone,
     })
     persistTokensIfRefreshed(res, refreshedAccessToken, refreshedRefreshToken)
     return res

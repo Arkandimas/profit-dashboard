@@ -23,9 +23,9 @@ const COOKIE_OPTS = {
   maxAge: 60 * 60 * 24 * 30,
 }
 
-// Orders processed per call. 10 order_sn per getOrderDetail API call × 2 sub-batches = 20.
-// Must complete within Vercel Hobby 10s limit (API ~2s + DB ~1s per sub-batch).
-const BATCH_SIZE = 20
+// Orders processed per call. Exactly 1 Shopee API call (max 10 order_sn) + 1 DB upsert.
+// Total: API ~2-3s + DB ~1s + token refresh ~1s = ~5s. Safe within Vercel Hobby 10s.
+const BATCH_SIZE = 10
 
 // Only exclude UNPAID — cancelled/returned orders also need detail enrichment
 // so their gmv, voucher_from_seller, etc. are populated for Penjualan KPI.

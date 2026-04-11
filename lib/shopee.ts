@@ -229,7 +229,59 @@ export function chunkDateRange(
   return chunks
 }
 
-/** Fetch orders for a specific unix-timestamp window (max 15-day span). */
+/** Result of a single-page order list fetch. */
+export interface OrderListPage {
+  orders: ShopeeOrderSummary[]
+  /** If non-empty, pass this as `cursor` to get the next page. */
+  nextCursor: string
+  /** True if there are more pages in this time window. */
+  hasMore: boolean
+}
+
+/**
+ * Fetch ONE PAGE of orders (max 100) for a time window.
+ * Caller must loop with the returned cursor to get all pages.
+ * This keeps each call under Vercel Hobby's 10s limit.
+ */
+export async function getOrderListPage(
+  accessToken: string,
+  shopId: number,
+  fromTs: number,
+  toTs: number,
+  cursor?: string,
+  orderStatus?: string
+): Promise<OrderListPage> {
+  const path = '/api/v2/order/get_order_list'
+  const params: Record<string, string | number> = {
+    time_range_field: 'create_time',
+    time_from: fromTs,
+    time_to: toTs,
+    page_size: 100,
+  }
+  if (cursor) params.cursor = cursor
+  if (orderStatus) params.order_status = orderStatus
+
+  const url = buildUrl(path, params, accessToken, shopId)
+  const res = await shopFetch(url)
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(`getOrderList HTTP ${res.status}: ${body.message || body.error || 'unknown'}`)
+  }
+  const data = await res.json()
+  if (data.error && data.error !== '') throw new Error(`getOrderList: ${data.message || data.error}`)
+
+  return {
+    orders: data.response?.order_list ?? [],
+    nextCursor: String(data.response?.next_cursor ?? ''),
+    hasMore: data.response?.more === true,
+  }
+}
+
+/**
+ * Fetch ALL orders for a time window (loops all pages internally).
+ * ⚠️ Only use server-side with generous timeout (not Vercel Hobby).
+ * For Hobby plan, use getOrderListPage() with frontend loop instead.
+ */
 export async function getOrderList(
   accessToken: string,
   shopId: number,
@@ -237,36 +289,14 @@ export async function getOrderList(
   toTs: number,
   orderStatus?: string
 ): Promise<ShopeeOrderSummary[]> {
-  const path = '/api/v2/order/get_order_list'
   const all: ShopeeOrderSummary[] = []
-  let cursor = ''
+  let cursor: string | undefined
 
   for (;;) {
-    const params: Record<string, string | number> = {
-      time_range_field: 'create_time',
-      time_from: fromTs,
-      time_to: toTs,
-      page_size: 100,
-    }
-    if (cursor) params.cursor = cursor
-    if (orderStatus) params.order_status = orderStatus
-
-    const url = buildUrl(path, params, accessToken, shopId)
-    const res = await shopFetch(url)
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new Error(`getOrderList HTTP ${res.status}: ${body.message || body.error || 'unknown'}`)
-    }
-    const data = await res.json()
-    if (data.error && data.error !== '') throw new Error(`getOrderList: ${data.message || data.error}`)
-
-    const list: ShopeeOrderSummary[] = data.response?.order_list ?? []
-    all.push(...list)
-
-    const more = data.response?.more === true
-    const next = String(data.response?.next_cursor ?? '')
-    if (!more || !next) break
-    cursor = next
+    const page = await getOrderListPage(accessToken, shopId, fromTs, toTs, cursor, orderStatus)
+    all.push(...page.orders)
+    if (!page.hasMore || !page.nextCursor) break
+    cursor = page.nextCursor
   }
 
   return all

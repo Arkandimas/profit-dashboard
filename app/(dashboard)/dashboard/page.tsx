@@ -99,23 +99,35 @@ export default function DashboardPage() {
   }, [])
 
   async function handleShopeeSync(days = 30) {
-    setSyncStatus({ state: 'loading', msg: `Listing orders (last ${days} days)…` })
+    setSyncStatus({ state: 'loading', msg: `Syncing orders (last ${days} days)…` })
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 600_000) // 10 min for large stores
+    const timeout = setTimeout(() => controller.abort(), 900_000) // 15 min for 5000+ orders
     try {
-      // ── Step 1: Fetch order list stubs — ONE chunk per call ───────────────
-      // Each call processes 1 × 15-day chunk to stay within Vercel Hobby 10s.
-      // Frontend loops until the API reports done: true.
+      // ── Step 1: Fetch order list stubs — ONE PAGE (100 orders) per call ───
+      // Each call: 1 Shopee API call + 1 DB upsert = ~4s (well within 10s).
+      // Frontend loops through chunks and pages until allDone.
       let totalQueued = 0
       let chunkIdx = 0
+      let cursor = ''
+      let callCount = 0
+
       while (true) {
-        setSyncStatus({ state: 'loading', msg: `Listing orders chunk ${chunkIdx + 1}… (${totalQueued} so far)` })
+        callCount++
+        setSyncStatus({ state: 'loading', msg: `Listing orders… ${totalQueued} found (call ${callCount})` })
+
+        const params = new URLSearchParams({
+          days: String(days),
+          chunk: String(chunkIdx),
+        })
+        if (cursor) params.set('cursor', cursor)
+
         const ordersRes = await fetch(
-          `/api/shopee/sync/orders?days=${days}&chunk=${chunkIdx}`,
+          `/api/shopee/sync/orders?${params}`,
           { method: 'POST', signal: controller.signal }
         )
-        const ordersData = await ordersRes.json().catch(() => ({ error: `Server error (HTTP ${ordersRes.status})` }))
-        if (ordersData.reconnect_required) {
+        const data = await ordersRes.json().catch(() => ({ error: `HTTP ${ordersRes.status}` }))
+
+        if (data.reconnect_required) {
           clearTimeout(timeout)
           setSyncStatus({
             state: 'error',
@@ -124,48 +136,51 @@ export default function DashboardPage() {
           })
           return
         }
-        if (!ordersRes.ok) throw new Error(ordersData.error ?? 'Order sync failed')
+        if (!ordersRes.ok) throw new Error(data.error ?? 'Order sync failed')
 
-        totalQueued += ordersData.synced ?? 0
-        chunkIdx++
+        totalQueued += data.synced ?? 0
 
-        if (ordersData.done) break
+        if (data.allDone) break
+
+        if (data.chunkDone) {
+          // Move to next chunk, reset cursor
+          chunkIdx++
+          cursor = ''
+        } else {
+          // Continue pagination within same chunk
+          cursor = data.cursor ?? ''
+        }
       }
 
       setSyncStatus({ state: 'loading', msg: `Orders listed: ${totalQueued} — fetching details…` })
 
-      // ── Step 2: Fetch order details in batches until done ──────────────────
-      // Each call processes up to 20 orders (Hobby 10s safe).
+      // ── Step 2: Fetch order details — 10 orders per call ──────────────────
       let detailsSynced = 0
       let detailsIteration = 0
       while (true) {
         const detailsRes = await fetch('/api/shopee/sync/details', { method: 'POST', signal: controller.signal })
         const detailsData = await detailsRes.json().catch(() => ({ done: true, updated: 0, remaining: 0 }))
-        if (!detailsRes.ok) break // non-fatal
+        if (!detailsRes.ok) break
 
         detailsSynced += detailsData.updated ?? 0
         detailsIteration++
-        setSyncStatus({ state: 'loading', msg: `Details synced: ${detailsSynced}${detailsData.remaining > 0 ? `, ${detailsData.remaining} remaining…` : ''}` })
+        const remaining = detailsData.remaining ?? 0
+        setSyncStatus({ state: 'loading', msg: `Details: ${detailsSynced} synced${remaining > 0 ? `, ${remaining} left` : ''}` })
 
-        // Refresh DB view every 5 detail batches so dashboard updates live
-        if (detailsIteration % 5 === 0) {
-          fetch('/api/orders?days=90').then((r) => r.json()).then((data) => {
-            if (Array.isArray(data)) setLiveOrders(data)
+        // Live refresh every 10 batches
+        if (detailsIteration % 10 === 0) {
+          fetch('/api/orders?days=90').then((r) => r.json()).then((d) => {
+            if (Array.isArray(d)) setLiveOrders(d)
           }).catch(() => {})
         }
 
         if (detailsData.done) break
       }
 
-      // Refresh after details are done
-      fetch('/api/orders?days=90').then((r) => r.json()).then((data) => {
-        if (Array.isArray(data)) setLiveOrders(data)
-      }).catch(() => {})
-
       clearTimeout(timeout)
       setSyncStatus({ state: 'success', orderCount: totalQueued, escrowCount: 0 })
 
-      // Final refresh with fully-synced data
+      // Final refresh
       const ordFinal = await fetch('/api/orders?days=90').then((r) => r.json())
       setLiveOrders(Array.isArray(ordFinal) ? ordFinal : [])
     } catch (err) {
