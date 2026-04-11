@@ -165,9 +165,12 @@ async function getOrderListAll(
 
     const url = await buildUrl(path, params, accessToken, shopId)
     const res = await fetch(url)
-    if (!res.ok) throw new Error(`getOrderList HTTP ${res.status}`)
+    if (!res.ok) {
+      const body = await res.text().catch(() => '(unreadable)')
+      throw new Error(`getOrderList HTTP ${res.status}: ${body}`)
+    }
     const data = await res.json()
-    if (data.error && data.error !== '') throw new Error(`getOrderList: ${data.message || data.error}`)
+    if (data.error && data.error !== '') throw new Error(`getOrderList: ${data.message || data.error} (code: ${data.error})`)
 
     const orders: OrderSummary[] = data.response?.order_list ?? []
     all.push(...orders)
@@ -301,6 +304,7 @@ Deno.serve(async (req) => {
     console.log(`sync-orders: shopId=${shopId}, days=${days}`)
 
     const tokenRow = await getValidToken(supabase, shopId)
+    console.log(`sync-orders: token loaded, expires_at=${tokenRow.expires_at}, now=${new Date().toISOString()}`)
     const { access_token: accessToken } = tokenRow
 
     const nowTs = Math.floor(Date.now() / 1000)
